@@ -8,24 +8,29 @@ const store = useHubStore()
 const query = ref('')
 const searchResults = ref<any[]>([])
 const isSearching = ref(false)
+let debounceTimeout: ReturnType<typeof setTimeout>
 
-// Sök i arkivet automatiskt när man skriver
-watch(query, async (newQuery) => {
+// Sök i arkivet med Debounce (för att inte hamra databasen)
+watch(query, (newQuery) => {
+  clearTimeout(debounceTimeout)
+  
   if (newQuery.length < 2) {
     searchResults.value = []
     isSearching.value = false
     return
   }
 
-  isSearching.value = true
-  try {
-    const res = await axios.get(`http://localhost:3001/api/search?q=${encodeURIComponent(newQuery)}`)
-    searchResults.value = res.data
-  } catch (e) {
-    console.error('Arkivsök misslyckades')
-  } finally {
-    isSearching.value = false
-  }
+  debounceTimeout = setTimeout(async () => {
+    isSearching.value = true
+    try {
+      const res = await axios.get(`http://localhost:3001/api/search?q=${encodeURIComponent(newQuery)}`)
+      searchResults.value = res.data
+    } catch (e) {
+      console.error('Arkivsök misslyckades')
+    } finally {
+      isSearching.value = false
+    }
+  }, 300) // Vänta 300ms efter sista tangenttryckningen
 })
 
 const searchExternal = (engine: string) => {

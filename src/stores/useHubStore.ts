@@ -22,6 +22,7 @@ export const useHubStore = defineStore('hub', () => {
   const parseDate = (d: any) => {
     try {
       const date = new Date(d)
+      if (isNaN(date.getTime())) return 'Nyligen'
       return formatDistanceToNow(date, { addSuffix: true, locale: sv })
         .replace('tio', '10').replace('elva', '11').replace('tolv', '12')
     } catch (e) { return 'Nyligen' }
@@ -30,7 +31,7 @@ export const useHubStore = defineStore('hub', () => {
   const fetchDashboard = async () => {
     newsLoading.value = true
     try {
-      // 1. Hämta CONFIG från Backend (Single Source of Truth)
+      // 1. Hämta CONFIG
       const configRes = await axios.get("http://localhost:3001/api/config/sources")
       const savedSources = JSON.parse(localStorage.getItem('newsSources') || '[]')
       
@@ -39,6 +40,7 @@ export const useHubStore = defineStore('hub', () => {
         return { ...s, enabled: existing ? existing.enabled : true }
       })
 
+      // 2. Hämta TOPPLISTA & TRENDER
       const res = await axios.get("http://localhost:3001/api/dashboard-init")
       topNews.value = res.data.topHeadlines.map((item: any) => ({
         ...item,
@@ -47,24 +49,28 @@ export const useHubStore = defineStore('hub', () => {
       }))
       trends.value = res.data.trends || []
 
-      const proxyUrl = "http://localhost:3001/api/news"
+      // 3. Hämta SAMLAD FEED (Senior Power!)
       const enabledSources = newsSources.value.filter((s: any) => s.enabled)
-      const results = await Promise.allSettled(enabledSources.map((s: any) => axios.get(proxyUrl, { params: { id: s.id } })))
-
-      const combined: any[] = []
-      results.forEach((res, idx) => {
-        if (res.status === 'fulfilled') {
-          const source = enabledSources[idx]
-          res.value.data.forEach((item: any) => {
-            combined.push({ ...item, category: source.category, pubDateFormatted: parseDate(item.pubDate), rawDate: new Date(item.pubDate) })
-          })
+      const activeIds = enabledSources.map(s => s.id).join(',')
+      
+      const feedRes = await axios.get(`http://localhost:3001/api/feed?sources=${activeIds}`)
+      
+      allNews.value = feedRes.data.map((item: any) => {
+        const sourceMeta = newsSources.value.find(s => s.id === item.sourceId)
+        return {
+          ...item,
+          category: sourceMeta?.category || 'Övrigt',
+          pubDateFormatted: parseDate(item.pubDate),
+          rawDate: new Date(item.pubDate)
         }
       })
-      allNews.value = combined.sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime())
-    } catch (e) { console.error('Dashboard sync failed', e) } finally { newsLoading.value = false }
+    } catch (e) { 
+      console.error('Architecture Sync failed', e) 
+    } finally { 
+      newsLoading.value = false 
+    }
   }
 
-  // --- BOOKMARK LOGIC ---
   const toggleBookmark = (item: any) => {
     const idx = bookmarks.value.findIndex(b => b.link === item.link)
     if (idx === -1) bookmarks.value.push({ ...item, savedAt: Date.now() })
@@ -100,7 +106,7 @@ export const useHubStore = defineStore('hub', () => {
   }, { deep: true })
 
   return {
-    isDarkMode, searchEngine, newsSources, allNews, topNews, trends, bookmarks, newsLoading, financeItems, quickLinks, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
+    isDarkMode, searchEngine, newsSources, allNews, topNews, trends, bookmarks, newsLoading, financeItems, statusItems: ref([]), quickLinks, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
     togglePanic: () => isPanicMode.value = !isPanicMode.value,
     toggleMode: () => isAdvancedMode.value = !isAdvancedMode.value,
     toggleSettings: () => isSettingsOpen.value = !isSettingsOpen.value,
