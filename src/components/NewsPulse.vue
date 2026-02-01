@@ -1,19 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useHubStore } from '../stores/useHubStore'
+import { formatDistanceToNow } from 'date-fns'
+import { sv } from 'date-fns/locale'
+import { Plus } from 'lucide-vue-next'
 
 const props = defineProps<{
   category?: string
   topOnly?: boolean
+  title?: string
 }>()
 
 const store = useHubStore()
+const displayLimit = ref(10)
 
 interface NewsItem {
   title: string
   link: string
   source: string
   pubDateFormatted: string
+  rawDate: Date
   description?: string
   sourceId: string
   category: string
@@ -28,31 +34,48 @@ const getDomain = (url: string) => {
   }
 }
 
+const parseDate = (date: Date) => {
+  return formatDistanceToNow(date, { addSuffix: true, locale: sv })
+    .replace('tio', '10').replace('elva', '11').replace('tolv', '12')
+}
+
 const filteredNews = computed(() => {
   const items = (props.topOnly ? store.topNews : store.allNews) as NewsItem[]
   if (!items || items.length === 0) return []
   
   if (props.topOnly) return items.slice(0, 10)
 
+  // Filtrera på kategori
   const categoryItems = props.category 
     ? items.filter(item => item.category === props.category)
     : items
 
+  // Sortera efter tid (senaste först) för att garantera blandat flöde
+  const sorted = [...categoryItems].sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime())
+
   const seenTitles = new Set<string>()
-  return categoryItems.filter(item => {
+  return sorted.filter(item => {
     const normalized = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)
     if (seenTitles.has(normalized)) return false
     seenTitles.add(normalized)
     return true
   })
 })
+
+const visibleNews = computed(() => {
+  return filteredNews.value.slice(0, displayLimit.value)
+})
+
+const showMore = () => {
+  displayLimit.value += 10
+}
 </script>
 
 <template>
   <div class="space-y-8">
-    <div class="flex items-center gap-4 border-b-2 border-paper-border pb-2 opacity-80">
-      <span class="news-subline italic text-paper-accent !text-sm">
-        {{ props.topOnly ? 'Analyserade Toppnyheter' : (props.category || 'Flöde') }}
+    <div class="flex items-center gap-4 border-b-2 border-paper-border pb-2 opacity-80 transition-colors duration-500">
+      <span class="news-subline italic text-paper-accent !text-sm uppercase tracking-widest">
+        {{ props.title || (props.topOnly ? 'De 10 viktigaste senaste dygnet' : (props.category || 'Nyhetsflöde')) }}
       </span>
       <div class="h-[1px] flex-1 bg-paper-border opacity-20"></div>
     </div>
@@ -62,12 +85,12 @@ const filteredNews = computed(() => {
       <div class="h-20 bg-paper-ink/5 rounded-xl"></div>
     </div>
 
-    <div v-else-if="filteredNews.length === 0" class="py-12 text-center border-2 border-dotted border-paper-border opacity-20">
-      <p class="text-sm italic">Synkroniserar arkivet...</p>
+    <div v-else-if="visibleNews.length === 0" class="py-12 text-center border-2 border-dotted border-paper-border opacity-20">
+      <p class="text-sm italic">Söker efter uppdateringar...</p>
     </div>
 
     <div v-else class="space-y-12">
-      <a v-for="(item, idx) in filteredNews" :key="item.link" :href="item.link" target="_blank" rel="noopener noreferrer" 
+      <a v-for="(item, idx) in visibleNews" :key="item.link" :href="item.link" target="_blank" rel="noopener noreferrer" 
          class="group block border-b border-paper-border pb-10 last:border-0 transition-all hover:translate-x-1">
         
         <div class="space-y-6">
@@ -80,16 +103,18 @@ const filteredNews = computed(() => {
               <img :src="`https://www.google.com/s2/favicons?domain=${getDomain(item.link)}&sz=64`" class="w-4 h-4 grayscale group-hover:grayscale-0 transition-all opacity-70 group-hover:opacity-100" alt="" />
               <span :class="{
                 'text-blue-700': item.sourceId === 'svt',
-                'text-paper-accent': item.sourceId === 'bbc' || item.sourceId === 'reuters',
+                'text-paper-border': item.sourceId === 'dn' || item.sourceId === 'nyt',
+                'text-yellow-700': item.sourceId === 'svd',
                 'text-orange-600': item.sourceId === 'reddit' || item.sourceId === 'aljazeera',
+                'text-paper-accent': item.sourceId === 'bbc' || item.sourceId === 'reuters' || item.sourceId === 'ap',
                 'text-emerald-700': item.sourceId === 'sc' || item.sourceId === 'tech'
               }">{{ item.source }}</span>
             </div>
-            <span>{{ item.pubDateFormatted }}</span>
+            <span>{{ parseDate(item.rawDate) }}</span>
           </div>
 
           <h4 class="news-headline text-paper-ink group-hover:text-paper-accent transition-colors leading-[1.1]" 
-              :class="idx === 0 && props.topOnly ? 'text-5xl md:text-6xl' : 'text-xl md:text-3xl'">
+              :class="idx === 0 && props.topOnly ? 'text-5xl md:text-6xl' : 'text-xl md:text-2xl'">
             {{ item.title }}
           </h4>
           
@@ -98,6 +123,17 @@ const filteredNews = computed(() => {
           </p>
         </div>
       </a>
+
+      <!-- Visa Fler Knapp -->
+      <div v-if="filteredNews.length > displayLimit" class="pt-4 text-center">
+        <button 
+          @click="showMore"
+          class="flex items-center gap-2 mx-auto px-8 py-3 border-2 border-paper-border font-black text-[10px] uppercase tracking-[0.2em] hover:bg-paper-ink hover:text-paper-bg transition-all active:scale-95"
+        >
+          <Plus class="h-4 w-4" />
+          {{ props.title?.startsWith('Senaste') ? props.title.replace('Senaste', 'Visa fler') : 'Visa fler nyheter' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

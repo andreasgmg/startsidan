@@ -58,23 +58,23 @@ onMounted(() => {
       <!-- Main Layout -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 mt-16 items-start">
         
-        <!-- Kolumn 1: Toppnyheter & Sverige (Bred) -->
+        <!-- Kolumn 1: Huvudflöde (Bred) -->
         <div class="lg:col-span-5 space-y-24">
-          <!-- Den nya kurerade modulen -->
           <NewsPulse :topOnly="true" />
-          
-          <NewsPulse category="Sverige" />
-          <NewsPulse category="Världen" />
+          <NewsPulse category="Sverige" title="Senaste från Sverige" />
+          <NewsPulse category="Världen" title="Senaste globalt" />
         </div>
 
-        <!-- Kolumn 2: Livet & Teknik (Mellan) -->
+        <!-- Kolumn 2: Livet, Teknik & Vetenskap (Mellan) -->
         <div class="lg:col-span-4 lg:px-10 lg:border-x lg:border-paper-border dark:lg:border-dark-border space-y-16">
           <CalendarWidget />
           <TodoWidget />
-          <NewsPulse category="Teknik" />
+          <NewsPulse category="Teknik" title="Senaste tekniknyheterna" />
+          <NewsPulse category="Vetenskap" title="Vetenskap & Framtid" />
+          <NewsPulse category="Spel" title="Spel & Digital Kultur" />
         </div>
 
-        <!-- Kolumn 3: Status & Reddit (Smal) -->
+        <!-- Kolumn 3: Status, Reddit & Intressen (Smal) -->
         <div class="lg:col-span-3 space-y-16">
           <WeatherWidget />
           <FinanceWidget />
@@ -83,14 +83,16 @@ onMounted(() => {
           <div v-if="dailyWord" class="p-8 border-4 border-paper-border italic bg-paper-surface relative group overflow-hidden shadow-[8px_8px_0px_var(--paper-border)]">
             <Quote class="absolute -right-4 -bottom-4 h-24 w-24 opacity-[0.03] rotate-12" />
             <span class="news-subline opacity-40 block mb-6 text-paper-muted">Dagens Ord</span>
-            <div class="space-y-4 relative z-10">
+            <div v-if="dailyWord" class="space-y-4 relative z-10">
               <h5 class="text-4xl font-black news-headline">{{ dailyWord.word }}</h5>
               <p class="text-sm font-medium leading-relaxed text-paper-muted">{{ dailyWord.meaning }}</p>
             </div>
             <div class="mt-8 pt-4 border-t border-paper-border text-[9px] font-black uppercase opacity-30 text-paper-muted">Källa: SAOL</div>
           </div>
 
-          <NewsPulse category="Reddit" />
+          <NewsPulse category="Reddit" title="Trendar på Reddit" />
+          <NewsPulse category="Sport" title="Sportens Värld" />
+          <NewsPulse category="Livsstil" title="Livsstil & Inspiration" />
         </div>
 
       </div>

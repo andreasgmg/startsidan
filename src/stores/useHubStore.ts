@@ -12,7 +12,32 @@ export const useHubStore = defineStore('hub', () => {
   const isAdvancedMode = ref(localStorage.getItem('isAdvancedMode') === 'true')
   const isSettingsOpen = ref(false)
   
-  const newsSources = ref(JSON.parse(localStorage.getItem('newsSources') || '[]'))
+  const defaultSources = [
+    { id: 'svt', name: 'SVT Nyheter', enabled: true, url: 'https://www.svt.se/nyheter/rss.xml', category: 'Sverige', weight: 100 },
+    { id: 'dn', name: 'Dagens Nyheter', enabled: true, url: 'https://www.dn.se/rss/nyheter/', category: 'Sverige', weight: 90 },
+    { id: 'svd', name: 'SvD', enabled: true, url: 'https://www.svd.se/?service=rss', category: 'Sverige', weight: 90 },
+    { id: 'bbc', name: 'BBC World', enabled: true, url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'Världen', weight: 95 },
+    { id: 'nyt', name: 'NY Times', enabled: true, url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', category: 'Världen', weight: 90 },
+    { id: 'npr', name: 'NPR News', enabled: true, url: 'https://feeds.npr.org/1001/rss.xml', category: 'Världen', weight: 95 },
+    { id: 'aljazeera', name: 'Al Jazeera', enabled: true, url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'Världen', weight: 85 },
+    { id: 'tech', name: 'TechCrunch', enabled: true, url: 'https://techcrunch.com/feed/', category: 'Teknik', weight: 60 },
+    { id: 'sc', name: 'SweClockers', enabled: true, url: 'https://www.sweclockers.com/feeds/nyheter', category: 'Teknik', weight: 60 },
+    { id: 'nasa', name: 'NASA', enabled: true, url: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', category: 'Vetenskap', weight: 50 },
+    { id: 'forsk', name: 'Forskning.se', enabled: true, url: 'https://www.forskning.se/feed/', category: 'Vetenskap', weight: 50 },
+    { id: 'fz', name: 'FZ.se', enabled: true, url: 'https://www.fz.se/feeds/nyheter', category: 'Spel', weight: 40 },
+    { id: 'svtsport', name: 'SVT Sport', enabled: true, url: 'https://www.svt.se/sport/rss.xml', category: 'Sport', weight: 70 },
+    { id: 'svtkultur', name: 'SVT Kultur', enabled: true, url: 'https://www.svt.se/kultur/rss.xml', category: 'Livsstil', weight: 60 },
+    { id: 'reddit', name: 'Reddit Popular', enabled: true, url: 'https://www.reddit.com/r/popular/top.json?t=day&limit=15', category: 'Reddit', weight: 30 }
+  ]
+
+  const newsSources = ref(JSON.parse(localStorage.getItem('newsSources') || JSON.stringify(defaultSources)))
+
+  // Migration logic
+  newsSources.value = defaultSources.map(def => {
+    const existing = newsSources.value.find((s: any) => s.id === def.id)
+    return existing ? { ...existing, category: def.category, url: def.url, weight: def.weight } : def
+  })
+
   const allNews = ref<any[]>([])
   const topNews = ref<any[]>([])
   const newsLoading = ref(false)
@@ -20,36 +45,26 @@ export const useHubStore = defineStore('hub', () => {
   const parseDate = (d: any) => {
     try {
       const date = new Date(d)
-      if (isNaN(date.getTime())) return 'Nyligen'
       return formatDistanceToNow(date, { addSuffix: true, locale: sv })
         .replace('tio', '10').replace('elva', '11').replace('tolv', '12')
     } catch (e) { return 'Nyligen' }
   }
 
-  // --- NY OPTIMERAD DASHBOARD INIT ---
-  const fetchDashboard = async (retryCount = 0) => {
+  const fetchDashboard = async () => {
     newsLoading.value = true
     try {
       const res = await axios.get("http://localhost:3001/api/dashboard-init")
-      
-      if (res.data.topHeadlines.length === 0 && retryCount < 3) {
-        console.log("Toppnyheter fortfarande tomma, försöker igen om 3 sekunder...");
-        setTimeout(() => fetchDashboard(retryCount + 1), 3000);
-        return;
-      }
-
       topNews.value = res.data.topHeadlines.map((item: any) => ({
         ...item,
         pubDateFormatted: parseDate(item.pubDate),
         rawDate: new Date(item.pubDate)
       }))
 
-      // 2. Hämta kategoriserade nyheter i bakgrunden
       const proxyUrl = "http://localhost:3001/api/news"
       const enabledSources = newsSources.value.filter((s: any) => s.enabled)
       
       const results = await Promise.allSettled(enabledSources.map((s: any) => 
-        axios.get(proxyUrl, { params: { url: s.url, id: s.id } })
+        axios.get(proxyUrl, { params: { id: s.id } })
       ))
 
       const combined: any[] = []
@@ -66,18 +81,23 @@ export const useHubStore = defineStore('hub', () => {
           })
         }
       })
-      allNews.value = combined
-
-    } catch (e) { 
-      console.error('MX Dashboard sync failed', e) 
-    } finally { 
-      newsLoading.value = false 
-    }
+      allNews.value = combined.sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime())
+    } catch (e) { console.error('Dashboard sync failed', e) } finally { newsLoading.value = false }
   }
 
-  // Persistenta items
-  const financeItems = ref(JSON.parse(localStorage.getItem('financeItems') || '[]'))
-  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || '[]'))
+  const financeItems = ref(JSON.parse(localStorage.getItem('financeItems') || JSON.stringify([
+    { id: 'el', name: 'Elpris (SE3)', enabled: true, value: '42.5', unit: 'öre' },
+    { id: 'ben', name: 'Bensin (95)', enabled: true, value: '17.84', unit: 'kr' },
+    { id: 'rate', name: 'Styrränta', enabled: true, value: '3.25', unit: '%' },
+    { id: 'usd', name: 'USD/SEK', enabled: true, value: '10.45', unit: 'kr' }
+  ])))
+
+  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || JSON.stringify([
+    { name: 'BankID', url: 'https://www.bankid.com', favicon: 'https://www.google.com/s2/favicons?domain=bankid.com&sz=64' },
+    { name: '1177', url: 'https://www.1177.se', favicon: 'https://www.google.com/s2/favicons?domain=1177.se&sz=64' },
+    { name: 'Skatteverket', url: 'https://www.skatteverket.se', favicon: 'https://www.google.com/s2/favicons?domain=skatteverket.se&sz=64' },
+    { name: 'Gmail', url: 'https://mail.google.com', favicon: 'https://www.google.com/s2/favicons?domain=google.com&sz=64' }
+  ])))
 
   const applyTheme = () => {
     if (isDarkMode.value) document.documentElement.classList.add('dark')
@@ -108,7 +128,7 @@ export const useHubStore = defineStore('hub', () => {
     toggleSettings: () => isSettingsOpen.value = !isSettingsOpen.value,
     toggleCompact: () => isCompactView.value = !isCompactView.value,
     toggleTheme: () => isDarkMode.value = !isDarkMode.value,
-    fetchAllNews: fetchDashboard, // Alias för bakåtkompatibilitet
+    fetchAllNews: fetchDashboard,
     addQuickLink: (name: string, url: string) => {
       const domain = new URL(url.startsWith('http') ? url : 'https://' + url).hostname
       const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
