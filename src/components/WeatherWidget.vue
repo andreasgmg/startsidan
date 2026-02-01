@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import axios from 'axios'
 import { Sun, Cloud, CloudRain, CloudLightning, CloudSun, MapPin } from 'lucide-vue-next'
 import { useHubStore } from '../stores/useHubStore'
@@ -9,11 +9,14 @@ const temp = ref<number | null>(null)
 const symbol = ref<number | null>(null)
 const forecast = ref<{ time: string, temp: number, symbol: number }[]>([])
 const loading = ref(true)
-const cityName = ref('Stockholm')
 
 const fetchWeather = async () => {
+  if (!store.userLocation) return
+  
+  loading.value = true
+  const { lat, lon } = store.userLocation
   try {
-    const response = await axios.get('https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/lon/18.06/lat/59.32/data.json')
+    const response = await axios.get(`https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/lon/${lon.toFixed(2)}/lat/${lat.toFixed(2)}/data.json`)
     const ts = response.data.timeSeries
     temp.value = ts[0].parameters.find((p: any) => p.name === 't').values[0]
     symbol.value = ts[0].parameters.find((p: any) => p.name === 'Wsymb2').values[0]
@@ -22,7 +25,11 @@ const fetchWeather = async () => {
       temp: t.parameters.find((p: any) => p.name === 't').values[0],
       symbol: t.parameters.find((p: any) => p.name === 'Wsymb2').values[0]
     }))
-  } catch (e) { console.error('Väderfel:', e) } finally { loading.value = false }
+  } catch (e) { 
+    console.error('Väderfel:', e) 
+  } finally { 
+    loading.value = false 
+  }
 }
 
 const getIcon = (s: number) => {
@@ -42,7 +49,14 @@ const clothingAdvice = computed(() => {
   return 'Det är varmt ute.'
 })
 
-onMounted(fetchWeather)
+// Hämta väder när platsen blir tillgänglig
+watch(() => store.userLocation, (newLoc) => {
+  if (newLoc) fetchWeather()
+}, { immediate: true })
+
+onMounted(() => {
+  if (store.userLocation) fetchWeather()
+})
 </script>
 
 <template>
@@ -50,12 +64,16 @@ onMounted(fetchWeather)
     <div class="flex items-center justify-between mb-8 border-b border-paper-border pb-2">
       <div class="flex items-center gap-2 text-paper-muted">
         <MapPin class="h-4 w-4 text-paper-accent" />
-        <span class="text-[10px] font-bold uppercase tracking-widest">{{ cityName }}</span>
+        <span class="text-[10px] font-bold uppercase tracking-widest">{{ store.userLocation?.city || 'Söker position...' }}</span>
       </div>
       <span class="news-subline italic">Lokal Prognos</span>
     </div>
     
-    <div v-if="loading" class="animate-pulse h-24 bg-paper-border opacity-10"></div>
+    <div v-if="loading" class="animate-pulse flex flex-col gap-4 py-4">
+      <div class="h-16 w-full bg-paper-ink/5"></div>
+      <div class="h-8 w-full bg-paper-ink/5"></div>
+    </div>
+    
     <div v-else class="space-y-12">
       <div class="flex items-center justify-between px-4">
         <div class="flex items-baseline gap-1">

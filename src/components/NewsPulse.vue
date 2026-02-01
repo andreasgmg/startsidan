@@ -87,7 +87,12 @@ const handleImageError = (event: any) => {
 
     <div v-else class="space-y-12">
       <div v-for="(item, idx) in visibleNews" :key="item.link" 
-         class="group block border-b border-paper-border pb-10 last:border-0 transition-all">
+         class="group block border-b border-paper-border pb-10 last:border-0 transition-all border-l-2 pl-6 -ml-6"
+         :class="{
+           'border-transparent': !item.sentiment || item.sentiment === 0,
+           'border-red-600/30': item.sentiment === -1,
+           'border-emerald-600/30': item.sentiment === 1
+         }">
         
         <div class="space-y-6">
           <!-- Top Feature Image (Item 1) -->

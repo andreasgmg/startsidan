@@ -17,7 +17,15 @@ export const useHubStore = defineStore('hub', () => {
   const topNews = ref<any[]>([])
   const trends = ref<string[]>([])
   const bookmarks = ref<any[]>(JSON.parse(localStorage.getItem('bookmarks') || '[]'))
+  const userLocation = ref<any>(JSON.parse(localStorage.getItem('userLocation') || 'null'))
   const newsLoading = ref(false)
+
+  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || JSON.stringify([
+    { name: 'BankID', url: 'https://www.bankid.com', favicon: 'https://www.google.com/s2/favicons?domain=bankid.com&sz=64' },
+    { name: '1177', url: 'https://www.1177.se', favicon: 'https://www.google.com/s2/favicons?domain=1177.se&sz=64' },
+    { name: 'Skatteverket', url: 'https://www.skatteverket.se', favicon: 'https://www.google.com/s2/favicons?domain=skatteverket.se&sz=64' },
+    { name: 'Gmail', url: 'https://mail.google.com', favicon: 'https://www.google.com/s2/favicons?domain=google.com&sz=64' }
+  ])))
 
   const parseDate = (d: any) => {
     try {
@@ -31,28 +39,32 @@ export const useHubStore = defineStore('hub', () => {
   const fetchDashboard = async () => {
     newsLoading.value = true
     try {
-      // 1. Hämta CONFIG
       const configRes = await axios.get("http://localhost:3001/api/config/sources")
+      let sources = configRes.data
+
+      if (userLocation.value && userLocation.value.county) {
+        try {
+          const localRes = await axios.get(`http://localhost:3001/api/config/local-source?county=${encodeURIComponent(userLocation.value.county)}`)
+          sources.push(localRes.data)
+        } catch (e) { console.warn('Local source fetch failed') }
+      }
+
       const savedSources = JSON.parse(localStorage.getItem('newsSources') || '[]')
-      
-      newsSources.value = configRes.data.map((s: any) => {
+      newsSources.value = sources.map((s: any) => {
         const existing = savedSources.find((ls: any) => ls.id === s.id)
         return { ...s, enabled: existing ? existing.enabled : true }
       })
 
-      // 2. Hämta TOPPLISTA & TRENDER
-      const res = await axios.get("http://localhost:3001/api/dashboard-init")
-      topNews.value = res.data.topHeadlines.map((item: any) => ({
+      const initRes = await axios.get("http://localhost:3001/api/dashboard-init")
+      topNews.value = initRes.data.topHeadlines.map((item: any) => ({
         ...item,
         pubDateFormatted: parseDate(item.pubDate),
         rawDate: new Date(item.pubDate)
       }))
-      trends.value = res.data.trends || []
+      trends.value = initRes.data.trends || []
 
-      // 3. Hämta SAMLAD FEED (Senior Power!)
       const enabledSources = newsSources.value.filter((s: any) => s.enabled)
       const activeIds = enabledSources.map(s => s.id).join(',')
-      
       const feedRes = await axios.get(`http://localhost:3001/api/feed?sources=${activeIds}`)
       
       allNews.value = feedRes.data.map((item: any) => {
@@ -64,11 +76,42 @@ export const useHubStore = defineStore('hub', () => {
           rawDate: new Date(item.pubDate)
         }
       })
-    } catch (e) { 
-      console.error('Architecture Sync failed', e) 
-    } finally { 
-      newsLoading.value = false 
-    }
+    } catch (e) { console.error('Architecture Sync failed', e) } finally { newsLoading.value = false }
+  }
+
+  const updateLocation = async (): Promise<void> => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve();
+        return;
+      }
+      
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords
+          const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`)
+          const addr = res.data.address
+          const county = addr.state || addr.province || addr.county || ''
+          
+          // Letar igenom alla nivåer från by till kommun för att hitta ett namn
+          const placeName = addr.city || addr.town || addr.municipality || addr.village || addr.hamlet || addr.suburb || addr.county || 'Din plats';
+          
+          userLocation.value = {
+            lat: latitude,
+            lon: longitude,
+            city: placeName.replace(' kommun', ''),
+            county: county.replace(' län', '').toLowerCase()
+          }
+          localStorage.setItem('userLocation', JSON.stringify(userLocation.value))
+          console.log(`[GEO] Plats funnen: ${userLocation.value.city}`);
+          await fetchDashboard()
+          resolve();
+        } catch (e) {
+          console.error('Location geocoding failed')
+          resolve();
+        }
+      }, () => resolve())
+    })
   }
 
   const toggleBookmark = (item: any) => {
@@ -77,28 +120,28 @@ export const useHubStore = defineStore('hub', () => {
     else bookmarks.value.splice(idx, 1)
   }
 
-  const isBookmarked = (link: string) => bookmarks.value.some(b => b.link === link)
-
-  const financeItems = ref(JSON.parse(localStorage.getItem('financeItems') || '[]'))
-  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || '[]'))
-
   const applyTheme = () => {
     if (isDarkMode.value) document.documentElement.classList.add('dark')
     else document.documentElement.classList.remove('dark')
   }
 
-  onMounted(() => {
+  onMounted(async () => {
     applyTheme()
-    fetchDashboard()
+    // 1. Försök hämta plats först
+    if (!userLocation.value) {
+      await updateLocation()
+    } else {
+      // Om vi redan har plats i localStorage, hämta dashboard direkt
+      fetchDashboard()
+    }
   })
 
-  watch([isDarkMode, searchEngine, newsSources, financeItems, quickLinks, bookmarks, isPanicMode, isCompactView, isAdvancedMode], () => {
+  watch([isDarkMode, searchEngine, newsSources, bookmarks, quickLinks, isPanicMode, isCompactView, isAdvancedMode], () => {
     localStorage.setItem('isDarkMode', isDarkMode.value.toString())
     localStorage.setItem('searchEngine', searchEngine.value)
     localStorage.setItem('newsSources', JSON.stringify(newsSources.value))
-    localStorage.setItem('financeItems', JSON.stringify(financeItems.value))
-    localStorage.setItem('quickLinks', JSON.stringify(quickLinks.value))
     localStorage.setItem('bookmarks', JSON.stringify(bookmarks.value))
+    localStorage.setItem('quickLinks', JSON.stringify(quickLinks.value))
     localStorage.setItem('isPanicMode', isPanicMode.value.toString())
     localStorage.setItem('isCompactView', isCompactView.value.toString())
     localStorage.setItem('isAdvancedMode', isAdvancedMode.value.toString())
@@ -106,14 +149,16 @@ export const useHubStore = defineStore('hub', () => {
   }, { deep: true })
 
   return {
-    isDarkMode, searchEngine, newsSources, allNews, topNews, trends, bookmarks, newsLoading, financeItems, statusItems: ref([]), quickLinks, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
+    isDarkMode, searchEngine, newsSources, allNews, topNews, trends, bookmarks, userLocation, newsLoading, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
+    financeItems: ref(JSON.parse(localStorage.getItem('financeItems') || '[]')),
+    quickLinks,
     togglePanic: () => isPanicMode.value = !isPanicMode.value,
     toggleMode: () => isAdvancedMode.value = !isAdvancedMode.value,
     toggleSettings: () => isSettingsOpen.value = !isSettingsOpen.value,
     toggleCompact: () => isCompactView.value = !isCompactView.value,
     toggleTheme: () => isDarkMode.value = !isDarkMode.value,
-    toggleBookmark, isBookmarked,
-    fetchAllNews: fetchDashboard,
+    toggleBookmark, isBookmarked: (link: string) => bookmarks.value.some(b => b.link === link), 
+    updateLocation, fetchAllNews: fetchDashboard,
     addQuickLink: (name: string, url: string) => {
       const domain = new URL(url.startsWith('http') ? url : 'https://' + url).hostname
       const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`

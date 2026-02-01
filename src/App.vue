@@ -67,14 +67,16 @@ onMounted(() => {
             title="Viktiga Meddelanden" 
           />
 
-          <!-- Sparade Artiklar (Visas bara om det finns några) -->
+          <NewsPulse :topOnly="true" />
+
+          <!-- Lokala Nyheter (SR P4) - Flyttad under Toppnyheter -->
           <NewsPulse 
-            v-if="store.bookmarks.length > 0" 
-            :customItems="store.bookmarks" 
-            title="Min Läslista" 
+            v-if="store.userLocation" 
+            category="Lokalt" 
+            :title="`Lokala nyheter: ${store.userLocation.city}`" 
           />
 
-          <NewsPulse :topOnly="true" />
+          <!-- Sparade Artiklar (Visas bara om det finns några) -->
           <NewsPulse category="Sverige" title="Senaste från Sverige" />
           <NewsPulse category="Världen" title="Senaste globalt" />
         </div>
