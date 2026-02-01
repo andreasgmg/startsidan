@@ -42,17 +42,22 @@ const insertStmt = db.prepare(`
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
-// --- MASTER CONFIG ---
+// --- MASTER CONFIG (Power User Edition) ---
 const GLOBAL_SOURCES = [
+  { id: 'kris', name: 'Krisinformation', url: 'https://api.krisinformation.se/v3/news?days=3', category: 'Viktigt', weight: 100 },
   { id: 'svt', name: 'SVT Nyheter', url: 'https://www.svt.se/nyheter/rss.xml', category: 'Sverige', weight: 55 },
+  { id: 'omni', name: 'Omni', url: 'https://omni.se/rss/nyheter', category: 'Sverige', weight: 50 },
   { id: 'dn', name: 'Dagens Nyheter', url: 'https://www.dn.se/rss/nyheter/', category: 'Sverige', weight: 50 },
   { id: 'svd', name: 'SvD', url: 'https://www.svd.se/?service=rss', category: 'Sverige', weight: 50 },
   { id: 'bbc', name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'Världen', weight: 55 },
   { id: 'npr', name: 'NPR News', url: 'https://feeds.npr.org/1001/rss.xml', category: 'Världen', weight: 55 },
   { id: 'ap', name: 'Assoc. Press', url: 'https://newsatme.com/ap-news-rss-feed/', category: 'Världen', weight: 60 },
   { id: 'nyt', name: 'NY Times', url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', category: 'Världen', weight: 50 },
+  { id: 'hn', name: 'Hacker News', url: 'https://hnrss.org/best', category: 'Teknik', weight: 60 },
   { id: 'tech', name: 'TechCrunch', url: 'https://techcrunch.com/feed/', category: 'Teknik', weight: 35 },
   { id: 'sc', name: 'SweClockers', url: 'https://www.sweclockers.com/feeds/nyheter', category: 'Teknik', weight: 35 },
+  { id: 'nasa', name: 'NASA', url: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', category: 'Vetenskap', weight: 40 },
+  { id: 'forsk', name: 'Forskning.se', url: 'https://www.forskning.se/feed/', category: 'Vetenskap', weight: 40 },
   { id: 'fz', name: 'FZ.se', url: 'https://www.fz.se/feeds/nyheter', category: 'Spel', weight: 35 },
   { id: 'svtsport', name: 'SVT Sport', url: 'https://www.svt.se/sport/rss.xml', category: 'Sport', weight: 45 },
   { id: 'svtkultur', name: 'SVT Kultur', url: 'https://www.svt.se/kultur/rss.xml', category: 'Livsstil', weight: 40 },
@@ -109,11 +114,10 @@ function calculateTopHeadlines() {
 
   const topTrends = [...trendMap.entries()]
     .sort((a, b) => b[1] - a[1])
-    .filter(e => e[1] > 1 || trendMap.size < 20) // Om vi har få ord, visa även de med count 1
+    .filter(e => e[1] > 1 || trendMap.size < 20)
     .slice(0, 10)
     .map(e => e[0]);
 
-  console.log(`[MX] Analys klar. Hittade ${allArticles.length} artiklar, ${trendMap.size} unika ord. Topp-trender: ${topTrends.join(', ')}`);
   return { articles: distinct.sort((a, b) => b.rankScore - a.rankScore), trends: topTrends };
 }
 
@@ -131,11 +135,7 @@ app.get('/api/dashboard-init', (req, res) => {
 app.get('/api/search', (req, res) => {
   const q = req.query.q;
   if (!q) return res.json([]);
-  const hits = db.prepare(`
-    SELECT * FROM articles 
-    WHERE title LIKE ? OR description LIKE ? 
-    ORDER BY pubDateMs DESC LIMIT 50
-  `).all(`%${q}%`, `%${q}%`);
+  const hits = db.prepare(`SELECT * FROM articles WHERE title LIKE ? OR description LIKE ? ORDER BY pubDateMs DESC LIMIT 50`).all(`%${q}%`, `%${q}%`);
   res.json(hits.map(h => ({ ...JSON.parse(h.fullJson), pubDate: h.pubDate })));
 });
 
@@ -147,7 +147,12 @@ app.get('/api/news', (req, res) => {
 
 async function fetchWithRetry(url, id) {
   try {
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 StartsidanPro/10.0' }, timeout: 15000, httpsAgent: agent });
+    const res = await axios.get(url, { 
+      headers: { 'User-Agent': 'Mozilla/5.0 StartsidanPro/10.0' }, 
+      timeout: 15000, 
+      httpsAgent: agent 
+    });
+
     if (id === 'reddit') {
       return res.data.data.children.map(c => {
         const pDate = new Date(c.data.created_utc * 1000).toISOString();
@@ -159,10 +164,36 @@ async function fetchWithRetry(url, id) {
         };
       });
     }
+
+    if (id === 'kris') {
+      return res.data.map(item => {
+        const pDate = item.Published;
+        return {
+          title: "⚠️ " + item.PushMessage,
+          link: `https://krisinformation.se/nyheter/${item.Id}`,
+          sourceId: 'kris', sourceName: 'KRISINFORMATION',
+          pubDate: pDate, pubDateMs: new Date(pDate).getTime(),
+          description: item.BodyText || item.PushMessage, image: null
+        };
+      });
+    }
+
+    if (id === 'hn') {
+      const feed = await parser.parseString(res.data);
+      return feed.items
+        .filter(i => !i.link.includes('ycombinator.com/companies') && !i.title.toLowerCase().includes('is hiring'))
+        .map(i => ({
+          title: i.title, link: i.link, sourceId: 'hn', sourceName: 'HACKER NEWS',
+          pubDate: i.isoDate || new Date().toISOString(), 
+          pubDateMs: new Date(i.isoDate || Date.now()).getTime(),
+          description: '', 
+          image: null
+        }));
+    }
+
     const feed = await parser.parseString(res.data);
     return feed.items.map(i => {
       const pDate = i.pubDate || i.isoDate || new Date().toISOString();
-      // Bättre bild-extraktion
       const img = i.enclosure?.url || i.mediaContent?.$.url || i.content?.match(/src="([^"]+)"/)?.[1] || null;
       return {
         title: i.title, link: i.link, sourceId: id, sourceName: feed.title?.split(' - ')[0] || id.toUpperCase(),
@@ -177,6 +208,7 @@ async function fetchWithRetry(url, id) {
 async function updateAllSources() {
   console.log('[SERVER] Synkar källor...');
   for (const source of GLOBAL_SOURCES) {
+    await new Promise(r => setTimeout(r, 500));
     const items = await fetchWithRetry(source.url, source.id);
     items.forEach(i => insertStmt.run(i.link, i.title, i.sourceId, i.sourceName, i.pubDate, i.pubDateMs, i.description, i.image, JSON.stringify(i), Date.now()));
   }
@@ -186,7 +218,7 @@ async function updateAllSources() {
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`>>> Intelligence Engine v10.1 (Search-First) on port ${PORT}`);
+  console.log(`>>> Intelligence Engine v10.0 (Product Grade) on port ${PORT}`);
   updateAllSources();
   setInterval(updateAllSources, 15 * 60 * 1000);
 });

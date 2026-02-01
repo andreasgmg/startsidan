@@ -30,10 +30,12 @@ export const useHubStore = defineStore('hub', () => {
   const fetchDashboard = async () => {
     newsLoading.value = true
     try {
+      // 1. Hämta CONFIG från Backend (Single Source of Truth)
       const configRes = await axios.get("http://localhost:3001/api/config/sources")
+      const savedSources = JSON.parse(localStorage.getItem('newsSources') || '[]')
+      
       newsSources.value = configRes.data.map((s: any) => {
-        const saved = JSON.parse(localStorage.getItem('newsSources') || '[]')
-        const existing = saved.find((ls: any) => ls.id === s.id)
+        const existing = savedSources.find((ls: any) => ls.id === s.id)
         return { ...s, enabled: existing ? existing.enabled : true }
       })
 

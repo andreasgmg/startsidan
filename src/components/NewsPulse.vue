@@ -126,7 +126,7 @@ const handleImageError = (event: any) => {
                 :class="idx === 0 && props.topOnly ? 'text-5xl md:text-7xl' : 'text-xl md:text-2xl'">
               {{ item.title }}
             </h4>
-            <p v-if="!store.isCompactView" class="mt-4 text-sm leading-relaxed text-paper-muted italic line-clamp-3 max-w-2xl border-l border-paper-border/10 pl-6 group-hover:border-paper-accent/40 transition-colors">
+            <p v-if="!store.isCompactView && item.description" class="mt-4 text-sm leading-relaxed text-paper-muted italic line-clamp-3 max-w-2xl border-l border-paper-border/10 pl-6 group-hover:border-paper-accent/40 transition-colors">
               {{ item.description }}
             </p>
           </a>

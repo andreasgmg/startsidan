@@ -60,6 +60,13 @@ onMounted(() => {
         
         <!-- Kolumn 1: Huvudflöde (Bred) -->
         <div class="lg:col-span-5 space-y-24">
+          <!-- Krisinformation (Visas bara om det finns meddelanden) -->
+          <NewsPulse 
+            v-if="store.allNews.some(n => n.category === 'Viktigt')"
+            category="Viktigt" 
+            title="Viktiga Meddelanden" 
+          />
+
           <!-- Sparade Artiklar (Visas bara om det finns några) -->
           <NewsPulse 
             v-if="store.bookmarks.length > 0" 
