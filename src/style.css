@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+/* 1. Definiera robusta variabler för Newspaper Pro med hög kontrast */
+:root {
+  --paper-bg: #f4f1ea;      /* Varmt tidningspapper */
+  --paper-ink: #111111;     /* Ännu svartare bläck */
+  --paper-muted: #2d2d2d;   /* Mycket mörkgrått bläck för garanterad läsbarhet */
+  --paper-border: #1a1a1a;  /* Tydliga avgränsare */
+  --paper-accent: #8b0000;  /* Dämpad röd */
+  --paper-surface: #ebe8e0; /* Subtilt mörkare papper för moduler */
+}
+
+.dark {
+  --paper-bg: #0c0c0e;      /* Natt-svart */
+  --paper-ink: #f1f5f9;     /* Off-white text */
+  --paper-muted: #cbd5e1;   /* Ljusgrått för hög kontrast i mörker */
+  --paper-border: #3f3f46;  /* Mörk border */
+  --paper-accent: #ff4d4d;  /* Klarare röd */
+  --paper-surface: #18181b; /* Mörk modulbakgrund */
+}
+
+/* 2. Koppla till Tailwind-temat */
+@theme {
+  --color-paper-bg: var(--paper-bg);
+  --color-paper-ink: var(--paper-ink);
+  --color-paper-muted: var(--paper-muted);
+  --color-paper-border: var(--paper-border);
+  --color-paper-accent: var(--paper-accent);
+  --color-paper-surface: var(--paper-surface);
+}
+
+:root {
+  background-color: var(--paper-bg);
+  color: var(--paper-ink);
+  font-family: 'Inter', -apple-system, system-ui, sans-serif; /* Bytte till Inter för bättre läsbarhet i brödtext */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tvinga bakgrunden på alla nivåer */
+html, body, #app {
+  background-color: var(--paper-bg);
+  margin: 0;
+  min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Papperstextur endast i ljust läge */
+:root:not(.dark) body {
+  background-image: url("https://www.transparenttextures.com/patterns/paper-fibers.png");
+}
+
+/* Modul-styling */
+.paper-module {
+  border: 1px solid var(--paper-border);
+  padding: 1.5rem;
+  background: var(--paper-bg);
+}
+
+.paper-module-thick {
+  border: 3px solid var(--paper-border);
+  background: var(--paper-surface);
+}
+
+/* Typografi - Garanterad kontrast */
+.news-headline {
+  font-family: 'Playfair Display', 'Times New Roman', serif;
+  font-weight: 900;
+  color: var(--paper-ink);
+}
+
+.news-subline {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  color: var(--paper-ink);
+}
+
+/* Brödtext-kontrast */
+.text-paper-muted {
+  color: var(--paper-muted) !important;
+  opacity: 1 !important; /* Ta bort genomskinlighet för att säkra kontrasten */
+}
+
+.paper-input {
+  background: transparent;
+  border-bottom: 2px solid var(--paper-border);
+  color: var(--paper-ink);
+  font-family: 'Inter', sans-serif;
+  font-style: italic;
+  outline: none;
+  width: 100%;
+}
+
+.paper-input::placeholder {
+  color: var(--paper-muted);
+  opacity: 0.6;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--paper-border); }
