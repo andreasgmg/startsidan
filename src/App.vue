@@ -60,6 +60,13 @@ onMounted(() => {
         
         <!-- Kolumn 1: Huvudflöde (Bred) -->
         <div class="lg:col-span-5 space-y-24">
+          <!-- Sparade Artiklar (Visas bara om det finns några) -->
+          <NewsPulse 
+            v-if="store.bookmarks.length > 0" 
+            :customItems="store.bookmarks" 
+            title="Min Läslista" 
+          />
+
           <NewsPulse :topOnly="true" />
           <NewsPulse category="Sverige" title="Senaste från Sverige" />
           <NewsPulse category="Världen" title="Senaste globalt" />
@@ -80,7 +87,7 @@ onMounted(() => {
           <FinanceWidget />
           
           <!-- Dagens Ord -->
-          <div v-if="dailyWord" class="p-8 border-4 border-paper-border italic bg-paper-surface relative group overflow-hidden shadow-[8px_8px_0px_var(--paper-border)]">
+          <div v-if="dailyWord" class="p-8 border border-paper-border italic bg-paper-gold/20 dark:bg-paper-gold/5 relative group overflow-hidden shadow-sm">
             <Quote class="absolute -right-4 -bottom-4 h-24 w-24 opacity-[0.03] rotate-12" />
             <span class="news-subline opacity-40 block mb-6 text-paper-muted">Dagens Ord</span>
             <div v-if="dailyWord" class="space-y-4 relative z-10">

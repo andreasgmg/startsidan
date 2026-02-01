@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useHubStore } from '../stores/useHubStore'
-import { formatDistanceToNow } from 'date-fns'
-import { sv } from 'date-fns/locale'
-import { Plus } from 'lucide-vue-next'
+import { Plus, Bookmark, BookmarkCheck } from 'lucide-vue-next'
 
 const props = defineProps<{
   category?: string
   topOnly?: boolean
   title?: string
+  customItems?: any[]
 }>()
 
 const store = useHubStore()
@@ -27,32 +26,22 @@ interface NewsItem {
 }
 
 const getDomain = (url: string) => {
-  try {
-    return new URL(url).hostname
-  } catch (e) {
-    return ''
-  }
-}
-
-const parseDate = (date: Date) => {
-  return formatDistanceToNow(date, { addSuffix: true, locale: sv })
-    .replace('tio', '10').replace('elva', '11').replace('tolv', '12')
+  try { return new URL(url).hostname } catch (e) { return '' }
 }
 
 const filteredNews = computed(() => {
+  if (props.customItems) return props.customItems
+  
   const items = (props.topOnly ? store.topNews : store.allNews) as NewsItem[]
   if (!items || items.length === 0) return []
   
   if (props.topOnly) return items.slice(0, 10)
 
-  // Filtrera på kategori
   const categoryItems = props.category 
     ? items.filter(item => item.category === props.category)
     : items
 
-  // Sortera efter tid (senaste först) för att garantera blandat flöde
   const sorted = [...categoryItems].sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime())
-
   const seenTitles = new Set<string>()
   return sorted.filter(item => {
     const normalized = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)
@@ -62,76 +51,98 @@ const filteredNews = computed(() => {
   })
 })
 
-const visibleNews = computed(() => {
-  return filteredNews.value.slice(0, displayLimit.value)
-})
+const visibleNews = computed(() => filteredNews.value.slice(0, displayLimit.value))
+const showMore = () => displayLimit.value += 10
 
-const showMore = () => {
-  displayLimit.value += 10
+const handleImageError = (event: any) => {
+  event.target.style.display = 'none'
 }
 </script>
 
 <template>
   <div class="space-y-8">
     <div class="flex items-center gap-4 border-b-2 border-paper-border pb-2 opacity-80 transition-colors duration-500">
+      <div class="w-2 h-8" :class="{
+        'bg-paper-accent': props.topOnly,
+        'bg-blue-600/40': props.category === 'Världen',
+        'bg-emerald-600/40': props.category === 'Sverige',
+        'bg-amber-600/40': ['Teknik', 'Vetenskap', 'Spel'].includes(props.category || ''),
+        'bg-orange-600/40': props.category === 'Reddit',
+        'bg-paper-muted': !props.category && !props.topOnly
+      }"></div>
       <span class="news-subline italic text-paper-accent !text-sm uppercase tracking-widest">
-        {{ props.title || (props.topOnly ? 'De 10 viktigaste senaste dygnet' : (props.category || 'Nyhetsflöde')) }}
+        {{ props.title || (props.topOnly ? 'Toppnyheter (24h)' : (props.category || 'Flöde')) }}
       </span>
       <div class="h-[1px] flex-1 bg-paper-border opacity-20"></div>
     </div>
     
-    <div v-if="store.newsLoading" class="space-y-8 animate-pulse">
-      <div class="h-40 bg-paper-ink/5 rounded-xl"></div>
-      <div class="h-20 bg-paper-ink/5 rounded-xl"></div>
+    <div v-if="store.newsLoading && !props.customItems" class="space-y-8 animate-pulse">
+      <div class="h-48 bg-paper-ink/5 rounded-xl"></div>
+      <div class="h-24 bg-paper-ink/5 rounded-xl"></div>
     </div>
 
     <div v-else-if="visibleNews.length === 0" class="py-12 text-center border-2 border-dotted border-paper-border opacity-20">
-      <p class="text-sm italic">Söker efter uppdateringar...</p>
+      <p class="text-sm italic">Inga nyheter att visa just nu.</p>
     </div>
 
     <div v-else class="space-y-12">
-      <a v-for="(item, idx) in visibleNews" :key="item.link" :href="item.link" target="_blank" rel="noopener noreferrer" 
-         class="group block border-b border-paper-border pb-10 last:border-0 transition-all hover:translate-x-1">
+      <div v-for="(item, idx) in visibleNews" :key="item.link" 
+         class="group block border-b border-paper-border pb-10 last:border-0 transition-all">
         
         <div class="space-y-6">
-          <div v-if="props.topOnly && idx === 0 && item.image" class="w-full h-64 overflow-hidden rounded-xl border-2 border-paper-border mb-6">
-            <img :src="item.image" class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" alt="" />
+          <!-- Top Feature Image (Item 1) -->
+          <div v-if="props.topOnly && idx === 0 && item.image" class="w-full h-80 overflow-hidden border-2 border-paper-border mb-8 bg-paper-ink/5 shadow-sm">
+            <img :src="item.image" @error="handleImageError" class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" alt="" />
           </div>
 
-          <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-paper-ink">
-            <div class="flex items-center gap-3">
-              <img :src="`https://www.google.com/s2/favicons?domain=${getDomain(item.link)}&sz=64`" class="w-4 h-4 grayscale group-hover:grayscale-0 transition-all opacity-70 group-hover:opacity-100" alt="" />
-              <span :class="{
-                'text-blue-700': item.sourceId === 'svt',
-                'text-paper-border': item.sourceId === 'dn' || item.sourceId === 'nyt',
-                'text-yellow-700': item.sourceId === 'svd',
-                'text-orange-600': item.sourceId === 'reddit' || item.sourceId === 'aljazeera',
-                'text-paper-accent': item.sourceId === 'bbc' || item.sourceId === 'reuters' || item.sourceId === 'ap',
-                'text-emerald-700': item.sourceId === 'sc' || item.sourceId === 'tech'
-              }">{{ item.source }}</span>
+          <div class="flex items-start gap-8">
+            <!-- Thumbnail for items 2-10 in Top List -->
+            <div v-if="props.topOnly && idx > 0 && item.image" class="hidden md:block w-32 h-32 flex-shrink-0 overflow-hidden border-2 border-paper-border bg-paper-ink/5 shadow-sm">
+              <img :src="item.image" @error="handleImageError" class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700" alt="" />
             </div>
-            <span>{{ parseDate(item.rawDate) }}</span>
+
+            <div class="flex-1 space-y-4">
+                                  <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-paper-ink">
+                                    <div class="flex items-center gap-3">
+                                      <img :src="`https://www.google.com/s2/favicons?domain=${getDomain(item.link)}&sz=64`" class="w-4 h-4 grayscale group-hover:grayscale-0 opacity-70 group-hover:opacity-100 transition-all" alt="" />
+                                      <span :class="{
+                                        'text-blue-700': item.sourceId === 'svt',
+                                        'text-paper-accent': ['bbc', 'npr', 'ap', 'reuters', 'newsapi'].includes(item.sourceId),
+                                        'text-orange-600': item.sourceId === 'reddit',
+                                        'text-emerald-700': ['sc', 'tech'].includes(item.sourceId)
+                                      }">{{ item.source }}</span>
+                                    </div>
+                                        <div class="flex items-center gap-4">
+                  <span class="text-paper-muted">{{ item.pubDateFormatted }}</span>
+                  <button @click.prevent="store.toggleBookmark(item)" class="hover:text-paper-accent transition-colors">
+                    <BookmarkCheck v-if="store.isBookmarked(item.link)" class="h-4 w-4 text-paper-accent" />
+                    <Bookmark v-else class="h-4 w-4 opacity-30 hover:opacity-100" />
+                  </button>
+                </div>
+              </div>
+
+          <a :href="item.link" target="_blank" rel="noopener noreferrer" class="block">
+            <h4 class="news-headline text-paper-ink group-hover:!text-paper-accent transition-all duration-300 leading-[1.1]" 
+                :class="idx === 0 && props.topOnly ? 'text-5xl md:text-7xl' : 'text-xl md:text-2xl'">
+              {{ item.title }}
+            </h4>
+            <p v-if="!store.isCompactView" class="mt-4 text-sm leading-relaxed text-paper-muted italic line-clamp-3 max-w-2xl border-l border-paper-border/10 pl-6 group-hover:border-paper-accent/40 transition-colors">
+              {{ item.description }}
+            </p>
+          </a>
+
+                        
+
+              
+            </div>
           </div>
-
-          <h4 class="news-headline text-paper-ink group-hover:text-paper-accent transition-colors leading-[1.1]" 
-              :class="idx === 0 && props.topOnly ? 'text-5xl md:text-6xl' : 'text-xl md:text-2xl'">
-            {{ item.title }}
-          </h4>
-          
-          <p v-if="!store.isCompactView" class="text-sm leading-relaxed text-paper-muted italic line-clamp-3 max-w-2xl border-l border-paper-border/10 pl-6">
-            {{ item.description }}
-          </p>
         </div>
-      </a>
+      </div>
 
-      <!-- Visa Fler Knapp -->
       <div v-if="filteredNews.length > displayLimit" class="pt-4 text-center">
-        <button 
-          @click="showMore"
-          class="flex items-center gap-2 mx-auto px-8 py-3 border-2 border-paper-border font-black text-[10px] uppercase tracking-[0.2em] hover:bg-paper-ink hover:text-paper-bg transition-all active:scale-95"
-        >
+        <button @click="showMore" class="flex items-center gap-2 mx-auto px-8 py-3 border-2 border-paper-border font-black text-[10px] uppercase tracking-[0.2em] hover:bg-paper-ink hover:text-paper-bg transition-all active:scale-95">
           <Plus class="h-4 w-4" />
-          {{ props.title?.startsWith('Senaste') ? props.title.replace('Senaste', 'Visa fler') : 'Visa fler nyheter' }}
+          {{ props.title?.startsWith('Senaste') ? props.title.replace('Senaste', 'Visa fler') : 'Visa fler' }}
         </button>
       </div>
     </div>

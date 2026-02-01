@@ -6,7 +6,14 @@ import Database from 'better-sqlite3';
 import https from 'https';
 
 const app = express();
-const parser = new RSSParser();
+const parser = new RSSParser({
+  customFields: {
+    item: [
+      ['media:content', 'mediaContent', {keepArray: false}],
+      ['enclosure', 'enclosure', {keepArray: false}]
+    ]
+  }
+});
 const PORT = 3001;
 
 const agent = new https.Agent({ rejectUnauthorized: false });
@@ -35,27 +42,24 @@ const insertStmt = db.prepare(`
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
-// --- CONFIG ---
+// --- MASTER CONFIG ---
 const GLOBAL_SOURCES = [
-  { id: 'svt', url: 'https://www.svt.se/nyheter/rss.xml', weight: 55 },
-  { id: 'dn', url: 'https://www.dn.se/rss/nyheter/', weight: 50 },
-  { id: 'svd', url: 'https://www.svd.se/?service=rss', weight: 50 },
-  { id: 'bbc', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', weight: 55 },
-  { id: 'npr', url: 'https://feeds.npr.org/1001/rss.xml', weight: 55 },
-  { id: 'ap', url: 'https://newsatme.com/ap-news-rss-feed/', weight: 60 },
-  { id: 'nyt', url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', weight: 50 },
-  { id: 'aljazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', weight: 45 },
-  { id: 'tech', url: 'https://techcrunch.com/feed/', weight: 35 },
-  { id: 'sc', url: 'https://www.sweclockers.com/feeds/nyheter', weight: 35 },
-  { id: 'nasa', url: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', weight: 40 },
-  { id: 'forsk', url: 'https://www.forskning.se/feed/', weight: 40 },
-  { id: 'fz', url: 'https://www.fz.se/feeds/nyheter', weight: 35 },
-  { id: 'svtsport', url: 'https://www.svt.se/sport/rss.xml', weight: 45 },
-  { id: 'svtkultur', url: 'https://www.svt.se/kultur/rss.xml', weight: 40 },
-  { id: 'reddit', url: 'https://www.reddit.com/r/popular/top.json?t=day&limit=15', weight: 15 }
+  { id: 'svt', name: 'SVT Nyheter', url: 'https://www.svt.se/nyheter/rss.xml', category: 'Sverige', weight: 55 },
+  { id: 'dn', name: 'Dagens Nyheter', url: 'https://www.dn.se/rss/nyheter/', category: 'Sverige', weight: 50 },
+  { id: 'svd', name: 'SvD', url: 'https://www.svd.se/?service=rss', category: 'Sverige', weight: 50 },
+  { id: 'bbc', name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'Världen', weight: 55 },
+  { id: 'npr', name: 'NPR News', url: 'https://feeds.npr.org/1001/rss.xml', category: 'Världen', weight: 55 },
+  { id: 'ap', name: 'Assoc. Press', url: 'https://newsatme.com/ap-news-rss-feed/', category: 'Världen', weight: 60 },
+  { id: 'nyt', name: 'NY Times', url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', category: 'Världen', weight: 50 },
+  { id: 'tech', name: 'TechCrunch', url: 'https://techcrunch.com/feed/', category: 'Teknik', weight: 35 },
+  { id: 'sc', name: 'SweClockers', url: 'https://www.sweclockers.com/feeds/nyheter', category: 'Teknik', weight: 35 },
+  { id: 'fz', name: 'FZ.se', url: 'https://www.fz.se/feeds/nyheter', category: 'Spel', weight: 35 },
+  { id: 'svtsport', name: 'SVT Sport', url: 'https://www.svt.se/sport/rss.xml', category: 'Sport', weight: 45 },
+  { id: 'svtkultur', name: 'SVT Kultur', url: 'https://www.svt.se/kultur/rss.xml', category: 'Livsstil', weight: 40 },
+  { id: 'reddit', name: 'Reddit Popular', url: 'https://www.reddit.com/r/popular/top.json?t=day&limit=15', category: 'Reddit', weight: 15 }
 ];
 
-const STOP_WORDS = new Set(['och', 'det', 'att', 'i', 'en', 'jag', 'hon', 'han', 'på', 'den', 'med', 'var', 'sig', 'för', 'så', 'till', 'är', 'men', 'ett', 'om', 'hade', 'de', 'av', 'icke', 'mig', 'du', 'henne', 'då', 'sin', 'nu', 'har', 'inte', 'hans', 'honom', 'skulle', 'hennes', 'där', 'min', 'man', 'ej', 'vid', 'kunde', 'något', 'från', 'ut', 'när', 'efter', 'upp', 'vi', 'dem', 'vara', 'vad', 'över', 'än', 'dig', 'kan', 'sina', 'här', 'ha', 'mot', 'alla', 'under', 'någon', 'eller', 'allt', 'mycket', 'sedan', 'ju', 'denna', 'själv', 'detta', 'åt', 'utan', 'varit', 'hur', 'ingen', 'mitt', 'ni', 'bli', 'blev', 'oss', 'din', 'dessa', 'några', 'deras', 'bliver', 'mina', 'samma', 'vilken', 'er', 'sådan', 'vår', 'blivit', 'dess', 'inom', 'mellan', 'sådant', 'varför', 'varje', 'vilka', 'ditt', 'vem', 'vilket', 'sitta', 'sådana', 'vart', 'dina', 'vars', 'vårt', 'våra', 'ert', 'era', 'vilkas', 'just', 'bland', 'även', 'både', 'idag', 'igår', 'säger', 'uppger', 'enligt', 'meddelar', 'skriver', 'finns', 'kommer', 'efter', 'eftersom', 'behöver', 'många', 'fler', 'stora', 'inför', 'redan', 'måste']);
+const STOP_WORDS = new Set(['och', 'det', 'att', 'i', 'en', 'jag', 'hon', 'han', 'på', 'den', 'med', 'var', 'sig', 'för', 'så', 'till', 'är', 'men', 'ett', 'om', 'hade', 'de', 'av', 'icke', 'mig', 'du', 'henne', 'då', 'sin', 'nu', 'har', 'inte', 'hans', 'honom', 'skulle', 'hennes', 'där', 'min', 'man', 'ej', 'vid', 'kunde', 'något', 'från', 'ut', 'när', 'efter', 'upp', 'vi', 'dem', 'vara', 'vad', 'över', 'än', 'dig', 'kan', 'sina', 'här', 'ha', 'mot', 'alla', 'under', 'någon', 'eller', 'allt', 'mycket', 'sedan', 'ju', 'denna', 'själv', 'detta', 'åt', 'utan', 'varit', 'hur', 'ingen', 'mitt', 'ni', 'bli', 'blev', 'oss', 'din', 'dessa', 'några', 'deras', 'bliver', 'mina', 'samma', 'vilken', 'er', 'sådan', 'vår', 'blivit', 'dess', 'inom', 'mellan', 'sådant', 'varför', 'varje', 'vilka', 'ditt', 'vem', 'vilket', 'sitta', 'sådana', 'vart', 'dina', 'vars', 'vårt', 'våra', 'ert', 'era', 'vilkas', 'just', 'bland', 'även', 'både', 'idag', 'igår', 'säger', 'uppger', 'enligt', 'meddelar', 'skriver', 'finns', 'kommer', 'behöver', 'många', 'fler', 'stora', 'inför', 'redan', 'måste', 'får', 'mer', 'vill', 'varit', 'blir', 'ska', 'skall', 'skulle', 'kunna', 'finns', 'fanns', 'fått', 'får', 'få', 'gå', 'gick', 'gått', 'gör', 'gjorde', 'gjort', 'tar', 'tog', 'tagit', 'ser', 'såg', 'sett']);
 
 function getKeywords(text) {
   if (!text) return [];
@@ -63,8 +67,8 @@ function getKeywords(text) {
 }
 
 function calculateSimilarity(articleA, articleB) {
-  const wordsA = new Set(getKeywords(articleA.title + " " + (articleA.description || "")));
-  const wordsB = new Set(getKeywords(articleB.title + " " + (articleB.description || "")));
+  const wordsA = new Set(getKeywords(articleA.title));
+  const wordsB = new Set(getKeywords(articleB.title));
   const intersection = [...wordsA].filter(x => wordsB.has(x)).length;
   const union = new Set([...wordsA, ...wordsB]).size;
   return union === 0 ? 0 : intersection / union;
@@ -73,7 +77,7 @@ function calculateSimilarity(articleA, articleB) {
 function calculateTopHeadlines() {
   const now = Date.now();
   const allArticles = db.prepare("SELECT * FROM articles WHERE pubDateMs > ?").all(now - (24 * 60 * 60 * 1000));
-  if (allArticles.length === 0) return [];
+  if (allArticles.length === 0) return { articles: [], trends: [] };
 
   const trendMap = new Map();
   allArticles.forEach(art => {
@@ -83,7 +87,7 @@ function calculateTopHeadlines() {
 
   const scored = allArticles.map(art => {
     let score = 10;
-    getKeywords(art.title).forEach(word => score += (trendMap.get(word) || 0) * 15);
+    getKeywords(art.title).forEach(word => score += (trendMap.get(word) || 0) * 20);
     const meta = GLOBAL_SOURCES.find(s => s.id === art.sourceId);
     score += (meta ? meta.weight : 25);
     const ageInHours = (now - art.pubDateMs) / (1000 * 60 * 60);
@@ -99,34 +103,51 @@ function calculateTopHeadlines() {
     if (existingIdx === -1) {
       distinct.push({ ...JSON.parse(art.fullJson), rankScore: art.rankScore });
     } else {
-      distinct[existingIdx].rankScore += (art.rankScore * 0.4);
+      distinct[existingIdx].rankScore += (art.rankScore * 0.5);
     }
   }
-  return distinct.sort((a, b) => b.rankScore - a.rankScore);
+
+  const topTrends = [...trendMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .filter(e => e[1] > 1 || trendMap.size < 20) // Om vi har få ord, visa även de med count 1
+    .slice(0, 10)
+    .map(e => e[0]);
+
+  console.log(`[MX] Analys klar. Hittade ${allArticles.length} artiklar, ${trendMap.size} unika ord. Topp-trender: ${topTrends.join(', ')}`);
+  return { articles: distinct.sort((a, b) => b.rankScore - a.rankScore), trends: topTrends };
 }
 
-// --- EXPRESS ---
 app.use(cors());
 
+app.get('/api/config/sources', (req, res) => {
+  res.json(GLOBAL_SOURCES.map(s => ({ id: s.id, name: s.name, category: s.category, weight: s.weight })));
+});
+
 app.get('/api/dashboard-init', (req, res) => {
-  res.json({ topHeadlines: calculateTopHeadlines(), serverTime: new Date() });
+  const result = calculateTopHeadlines();
+  res.json({ topHeadlines: result.articles, trends: result.trends });
+});
+
+app.get('/api/search', (req, res) => {
+  const q = req.query.q;
+  if (!q) return res.json([]);
+  const hits = db.prepare(`
+    SELECT * FROM articles 
+    WHERE title LIKE ? OR description LIKE ? 
+    ORDER BY pubDateMs DESC LIMIT 50
+  `).all(`%${q}%`, `%${q}%`);
+  res.json(hits.map(h => ({ ...JSON.parse(h.fullJson), pubDate: h.pubDate })));
 });
 
 app.get('/api/news', (req, res) => {
   const { id } = req.query;
-  // Sortera på riktig pubDateMs istället för inmatningstid
   const articles = db.prepare("SELECT * FROM articles WHERE sourceId = ? ORDER BY pubDateMs DESC LIMIT 25").all(id);
   res.json(articles.map(art => ({ ...JSON.parse(art.fullJson), pubDate: art.pubDate })));
 });
 
-// --- FETCH SERVICE ---
 async function fetchWithRetry(url, id) {
   try {
-    const res = await axios.get(url, { 
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      timeout: 15000,
-      httpsAgent: agent
-    });
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 StartsidanPro/10.0' }, timeout: 15000, httpsAgent: agent });
     if (id === 'reddit') {
       return res.data.data.children.map(c => {
         const pDate = new Date(c.data.created_utc * 1000).toISOString();
@@ -141,30 +162,31 @@ async function fetchWithRetry(url, id) {
     const feed = await parser.parseString(res.data);
     return feed.items.map(i => {
       const pDate = i.pubDate || i.isoDate || new Date().toISOString();
+      // Bättre bild-extraktion
+      const img = i.enclosure?.url || i.mediaContent?.$.url || i.content?.match(/src="([^"]+)"/)?.[1] || null;
       return {
         title: i.title, link: i.link, sourceId: id, sourceName: feed.title?.split(' - ')[0] || id.toUpperCase(),
         pubDate: pDate, pubDateMs: new Date(pDate).getTime(),
         description: (i.contentSnippet || "").replace(/<[^>]*>/g, '').slice(0, 300),
-        image: i.enclosure?.url || null
+        image: img
       };
     });
-  } catch (e) {
-    console.error(`[FETCH ERROR] ${id}: ${e.message}`);
-    return [];
-  }
+  } catch (e) { return []; }
 }
 
 async function updateAllSources() {
-  console.log('[SERVER] Synkroniserar källor...');
+  console.log('[SERVER] Synkar källor...');
   for (const source of GLOBAL_SOURCES) {
-    await new Promise(r => setTimeout(r, 500));
     const items = await fetchWithRetry(source.url, source.id);
     items.forEach(i => insertStmt.run(i.link, i.title, i.sourceId, i.sourceName, i.pubDate, i.pubDateMs, i.description, i.image, JSON.stringify(i), Date.now()));
   }
+  db.prepare("DELETE FROM articles WHERE pubDateMs < ?").run(Date.now() - (48 * 60 * 60 * 1000));
+  db.exec("VACUUM");
+  console.log('[SERVER] Synk klar.');
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`>>> Intelligence Engine v8.4 (Perfect Sorting) on port ${PORT}`);
+  console.log(`>>> Intelligence Engine v10.1 (Search-First) on port ${PORT}`);
   updateAllSources();
   setInterval(updateAllSources, 15 * 60 * 1000);
 });
