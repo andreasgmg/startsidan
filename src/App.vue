@@ -25,7 +25,6 @@ const dailyWord = ref(dailyWords[0])
 onMounted(() => {
   const dayIndex = new Date().getDate() % dailyWords.length
   dailyWord.value = dailyWords[dayIndex]
-  store.fetchAllNews() // Tvinga en hämtning vid start
 })
 </script>
 
@@ -45,7 +44,7 @@ onMounted(() => {
       <header class="flex flex-col md:flex-row justify-between items-end border-b-8 border-paper-border pb-6 mb-12 gap-8">
         <div class="flex flex-col">
           <h1 class="text-8xl md:text-9xl news-headline leading-none">Startsidan<span class="text-paper-accent">.</span></h1>
-          <p class="text-sm font-bold uppercase tracking-[0.4em] mt-4 opacity-60 italic">Din dagliga överblick // 2026</p>
+          <p class="text-sm font-bold uppercase tracking-[0.4em] mt-4 opacity-60 italic">Kurerad överblick // 2026</p>
         </div>
         
         <div class="flex flex-col items-end gap-2 text-[10px] font-black uppercase tracking-widest opacity-40">
@@ -59,14 +58,17 @@ onMounted(() => {
       <!-- Main Layout -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 mt-16 items-start">
         
-        <!-- Kolumn 1: Huvudnyheter (Bred) -->
-        <div class="lg:col-span-5 space-y-16">
+        <!-- Kolumn 1: Toppnyheter & Sverige (Bred) -->
+        <div class="lg:col-span-5 space-y-24">
+          <!-- Den nya kurerade modulen -->
+          <NewsPulse :topOnly="true" />
+          
           <NewsPulse category="Sverige" />
           <NewsPulse category="Världen" />
         </div>
 
         <!-- Kolumn 2: Livet & Teknik (Mellan) -->
-        <div class="lg:col-span-4 lg:px-10 lg:border-x lg:border-paper-border space-y-16">
+        <div class="lg:col-span-4 lg:px-10 lg:border-x lg:border-paper-border dark:lg:border-dark-border space-y-16">
           <CalendarWidget />
           <TodoWidget />
           <NewsPulse category="Teknik" />

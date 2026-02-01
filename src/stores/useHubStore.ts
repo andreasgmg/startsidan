@@ -1,8 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import axios from 'axios'
-import { formatDistanceToNow } from 'date-fns'
-import { sv } from 'date-fns/locale'
+import { isAfter, subHours, differenceInMinutes } from 'date-fns'
 
 export const useHubStore = defineStore('hub', () => {
   const isDarkMode = ref(localStorage.getItem('isDarkMode') === 'true')
@@ -12,101 +11,25 @@ export const useHubStore = defineStore('hub', () => {
   const isAdvancedMode = ref(localStorage.getItem('isAdvancedMode') === 'true')
   const isSettingsOpen = ref(false)
   
-  const newsSources = ref(JSON.parse(localStorage.getItem('newsSources') || JSON.stringify([
-    { id: 'svt', name: 'SVT Nyheter', enabled: true, url: 'https://www.svt.se/nyheter/rss.xml', category: 'Sverige' },
-    { id: 'dn', name: 'Dagens Nyheter', enabled: true, url: 'https://www.dn.se/rss/nyheter/', category: 'Sverige' },
-    { id: 'svd', name: 'SvD', enabled: true, url: 'https://www.svd.se/?service=rss', category: 'Sverige' },
-    { id: 'bbc', name: 'BBC World', enabled: true, url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'Världen' },
-    { id: 'nyt', name: 'NY Times', enabled: true, url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', category: 'Världen' },
-    { id: 'reuters', name: 'Reuters', enabled: true, url: 'https://www.reuters.com/world/rss', category: 'Världen' },
-    { id: 'aljazeera', name: 'Al Jazeera', enabled: true, url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'Världen' },
-    { id: 'tech', name: 'TechCrunch', enabled: true, url: 'https://techcrunch.com/feed/', category: 'Teknik' },
-    { id: 'sc', name: 'SweClockers', enabled: true, url: 'https://www.sweclockers.com/feeds/nyheter', category: 'Teknik' },
-    { id: 'reddit', name: 'Reddit Popular', enabled: true, url: 'https://www.reddit.com/r/popular/top.json?t=day&limit=15', category: 'Reddit' }
-  ])))
+  const defaultSources = [
+    { id: 'svt', name: 'SVT Nyheter', enabled: true, url: 'https://www.svt.se/nyheter/rss.xml', category: 'Sverige', weight: 100 },
+    { id: 'dn', name: 'Dagens Nyheter', enabled: true, url: 'https://www.dn.se/rss/nyheter/', category: 'Sverige', weight: 95 },
+    { id: 'svd', name: 'SvD', enabled: true, url: 'https://www.svd.se/?service=rss', category: 'Sverige', weight: 95 },
+    { id: 'bbc', name: 'BBC World', enabled: true, url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'Världen', weight: 95 },
+    { id: 'reuters', name: 'Reuters', enabled: true, url: 'https://www.reuters.com/world/rss', category: 'Världen', weight: 100 },
+    { id: 'ap', name: 'Assoc. Press', enabled: true, url: 'https://newsatme.com/ap-news-rss-feed/', category: 'Världen', weight: 100 },
+    { id: 'nyt', name: 'NY Times', enabled: true, url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', category: 'Världen', weight: 90 },
+    { id: 'aljazeera', name: 'Al Jazeera', enabled: true, url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'Världen', weight: 85 },
+    { id: 'tech', name: 'TechCrunch', enabled: true, url: 'https://techcrunch.com/feed/', category: 'Teknik', weight: 60 },
+    { id: 'sc', name: 'SweClockers', enabled: true, url: 'https://www.sweclockers.com/feeds/nyheter', category: 'Teknik', weight: 60 },
+    { id: 'reddit', name: 'Reddit Popular', enabled: true, url: 'https://www.reddit.com/r/popular/top.json?t=day&limit=15', category: 'Reddit', weight: 30 }
+  ]
 
+  const newsSources = ref(JSON.parse(localStorage.getItem('newsSources') || JSON.stringify(defaultSources)))
   const allNews = ref<any[]>([])
   const newsLoading = ref(false)
 
-  const fetchAllNews = async () => {
-    const enabledSources = newsSources.value.filter((s: any) => s.enabled)
-    if (enabledSources.length === 0) {
-      allNews.value = []
-      return
-    }
-    
-    newsLoading.value = true
-    
-    // Vi använder en ren CORS-proxy för att hämta RÅ XML
-    const proxy = "https://corsproxy.io/?"
-
-    const promises = enabledSources.map(async (source: any) => {
-      try {
-        const fetchUrl = source.id === 'reddit' ? source.url : `${proxy}${encodeURIComponent(source.url)}`
-        const res = await axios.get(fetchUrl, { 
-          timeout: 12000,
-          responseType: source.id === 'reddit' ? 'json' : 'text' 
-        })
-        
-        const parseDate = (d: any) => {
-          try {
-            const date = new Date(d)
-            if (isNaN(date.getTime())) return 'Nyligen'
-            return formatDistanceToNow(date, { addSuffix: true, locale: sv })
-              .replace('tio', '10').replace('elva', '11').replace('tolv', '12')
-          } catch (e) { return 'Nyligen' }
-        }
-
-        // 1. Hantera Reddit (JSON)
-        if (source.id === 'reddit') {
-          const data = res.data
-          return data.data.children.map((child: any) => ({
-            title: child.data.title,
-            link: `https://reddit.com${child.data.permalink}`,
-            source: `REDDIT R/${child.data.subreddit.toUpperCase()}`,
-            sourceId: 'reddit',
-            category: 'Reddit',
-            pubDate: parseDate(child.data.created_utc * 1000),
-            description: child.data.selftext || 'Diskussion på Reddit.'
-          }))
-        } 
-        
-        // 2. Hantera RSS (XML) - Vi tolkar XML direkt
-        const parser = new DOMParser()
-        const xml = parser.parseFromString(res.data, "text/xml")
-        const items = Array.from(xml.querySelectorAll("item")).slice(0, 10)
-
-        return items.map(el => {
-          return {
-            title: el.querySelector("title")?.textContent || "",
-            link: el.querySelector("link")?.textContent || "",
-            source: source.name,
-            sourceId: source.id,
-            category: source.category,
-            pubDate: parseDate(el.querySelector("pubDate")?.textContent || ""),
-            description: (el.querySelector("description")?.textContent || "").replace(/<[^>]*>/g, '').slice(0, 300)
-          }
-        })
-      } catch (e) {
-        console.error(`Källa misslyckades: ${source.name}`, e)
-        return []
-      }
-    })
-
-    const results = await Promise.allSettled(promises)
-    const combined: any[] = []
-    
-    results.forEach((result) => {
-      if (result.status === 'fulfilled' && result.value) {
-        combined.push(...result.value)
-      }
-    })
-
-    allNews.value = combined
-    newsLoading.value = false
-  }
-
-  // Persistenta data...
+  // Ekonomi
   const financeItems = ref(JSON.parse(localStorage.getItem('financeItems') || JSON.stringify([
     { id: 'el', name: 'Elpris (SE3)', enabled: true, value: '42.5', unit: 'öre' },
     { id: 'ben', name: 'Bensin (95)', enabled: true, value: '17.84', unit: 'kr' },
@@ -114,17 +37,78 @@ export const useHubStore = defineStore('hub', () => {
     { id: 'usd', name: 'USD/SEK', enabled: true, value: '10.45', unit: 'kr' }
   ])))
 
-  const statusItems = ref(JSON.parse(localStorage.getItem('statusItems') || JSON.stringify([
-    { id: 'bankid', name: 'BankID', enabled: true, status: 'OK' },
-    { id: 'swish', name: 'Swish', enabled: true, status: 'OK' }
+  // Genvägar
+  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || JSON.stringify([
+    { name: 'BankID', url: 'https://www.bankid.com', favicon: 'https://www.google.com/s2/favicons?domain=bankid.com&sz=64' },
+    { name: '1177', url: 'https://www.1177.se', favicon: 'https://www.google.com/s2/favicons?domain=1177.se&sz=64' },
+    { name: 'Skatteverket', url: 'https://www.skatteverket.se', favicon: 'https://www.google.com/s2/favicons?domain=skatteverket.se&sz=64' },
+    { name: 'Gmail', url: 'https://mail.google.com', favicon: 'https://www.google.com/s2/favicons?domain=google.com&sz=64' }
   ])))
 
-  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || JSON.stringify([
-    { name: 'BankID', url: 'https://www.bankid.com' },
-    { name: '1177', url: 'https://www.1177.se' },
-    { name: 'Skatteverket', url: 'https://www.skatteverket.se' },
-    { name: 'Gmail', url: 'https://mail.google.com' }
-  ])))
+  const fetchAllNews = async () => {
+    newsLoading.value = true
+    const proxyUrl = "http://localhost:3001/api/news"
+    const archiveUrl = "http://localhost:3001/api/archive"
+
+    try {
+      const enabledSources = newsSources.value.filter((s: any) => s.enabled)
+      await Promise.allSettled(enabledSources.map((s: any) => axios.get(proxyUrl, { params: { url: s.url, id: s.id } })))
+      
+      const res = await axios.get(archiveUrl)
+      allNews.value = res.data.map((item: any) => {
+        const sourceMeta = newsSources.value.find((s: any) => s.id === item.sourceId)
+        return {
+          ...item,
+          category: sourceMeta?.category || 'Övrigt',
+          sourceWeight: sourceMeta?.weight || 50,
+          rawDate: new Date(item.pubDate)
+        }
+      })
+    } catch (e) { console.error('News fetch error') } finally { newsLoading.value = false }
+  }
+
+  const topNews = computed(() => {
+    const dayAgo = subHours(new Date(), 24)
+    const breakingKeywords = ['breaking', 'extra', 'just nu', 'larm', 'direkt', 'akut']
+    
+    const scoredNews = allNews.value
+      .filter(item => isAfter(item.rawDate, dayAgo))
+      .map(item => ({ ...item, importanceScore: item.sourceWeight || 50 }))
+
+    scoredNews.forEach((item, idx) => {
+      const normalizedTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '')
+      scoredNews.forEach((other, oIdx) => {
+        if (idx === oIdx) return
+        const otherNormalized = other.title.toLowerCase().replace(/[^a-z0-9]/g, '')
+        if ((normalizedTitle.includes(otherNormalized) || otherNormalized.includes(normalizedTitle)) && 
+            Math.abs(differenceInMinutes(item.rawDate, other.rawDate)) < 240) {
+          item.importanceScore += 150
+        }
+      })
+      if (breakingKeywords.some(key => item.title.toLowerCase().includes(key))) item.importanceScore += 80
+      const hoursOld = (new Date().getTime() - item.rawDate.getTime()) / (1000 * 60 * 60)
+      item.importanceScore -= (hoursOld * 1.5)
+    })
+
+    const sorted = scoredNews.sort((a, b) => b.importanceScore - a.importanceScore)
+    const finalTop: any[] = []
+    const seenTitles = new Set<string>()
+    const sourceCount: Record<string, number> = {}
+
+    for (const item of sorted) {
+      if (finalTop.length >= 5) break
+      const normalized = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)
+      const sId = item.sourceId || 'unknown'
+      if (!seenTitles.has(normalized)) {
+        if ((sourceCount[sId] || 0) < 1 || item.importanceScore > 200) {
+          finalTop.push(item)
+          seenTitles.add(normalized)
+          sourceCount[sId] = (sourceCount[sId] || 0) + 1
+        }
+      }
+    }
+    return finalTop
+  })
 
   const applyTheme = () => {
     if (isDarkMode.value) document.documentElement.classList.add('dark')
@@ -136,12 +120,11 @@ export const useHubStore = defineStore('hub', () => {
     fetchAllNews()
   })
 
-  watch([isDarkMode, searchEngine, newsSources, financeItems, statusItems, quickLinks, isPanicMode, isCompactView, isAdvancedMode], () => {
+  watch([isDarkMode, searchEngine, newsSources, financeItems, quickLinks, isPanicMode, isCompactView, isAdvancedMode], () => {
     localStorage.setItem('isDarkMode', isDarkMode.value.toString())
     localStorage.setItem('searchEngine', searchEngine.value)
     localStorage.setItem('newsSources', JSON.stringify(newsSources.value))
     localStorage.setItem('financeItems', JSON.stringify(financeItems.value))
-    localStorage.setItem('statusItems', JSON.stringify(statusItems.value))
     localStorage.setItem('quickLinks', JSON.stringify(quickLinks.value))
     localStorage.setItem('isPanicMode', isPanicMode.value.toString())
     localStorage.setItem('isCompactView', isCompactView.value.toString())
@@ -150,7 +133,7 @@ export const useHubStore = defineStore('hub', () => {
   }, { deep: true })
 
   return {
-    isDarkMode, searchEngine, newsSources, allNews, newsLoading, financeItems, statusItems, quickLinks, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
+    isDarkMode, searchEngine, newsSources, allNews, topNews, newsLoading, financeItems, statusItems: ref([]), quickLinks, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
     togglePanic: () => isPanicMode.value = !isPanicMode.value,
     toggleMode: () => isAdvancedMode.value = !isAdvancedMode.value,
     toggleSettings: () => isSettingsOpen.value = !isSettingsOpen.value,

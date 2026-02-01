@@ -5,16 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node server.js",
+    "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@primevue/themes": "^4.5.4",
     "axios": "^1.13.4",
+    "cors": "^2.8.6",
     "date-fns": "^4.1.0",
+    "express": "^5.2.1",
     "lucide-vue-next": "^0.563.0",
     "pinia": "^3.0.4",
     "primevue": "^4.5.4",
+    "rss-parser": "^3.13.0",
     "vue": "^3.5.24",
     "vuedraggable": "^4.1.0"
   },
@@ -24,6 +29,7 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.8.1",
     "autoprefixer": "^10.4.24",
+    "concurrently": "^9.2.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
