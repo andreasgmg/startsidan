@@ -38,6 +38,33 @@
   --color-paper-gold: var(--paper-gold);
 }
 
+/* Global Interaction Rules */
+a, button, [role="button"], input[type="button"], input[type="submit"] {
+  cursor: pointer;
+}
+
+/* Tasteful Neo-Brutalism Utilities */
+.neo-subtle {
+  border: 1px solid var(--paper-border);
+  box-shadow: 2px 2px 0px var(--paper-border);
+  transition: all 0.2s ease;
+}
+
+.neo-subtle:hover {
+  box-shadow: 4px 4px 0px var(--paper-border);
+  transform: translate(-1px, -1px);
+}
+
+.neo-subtle:active {
+  box-shadow: 1px 1px 0px var(--paper-border);
+  transform: translate(1px, 1px);
+}
+
+.neo-tag {
+  border: 1px solid var(--paper-border);
+  box-shadow: 1px 1px 0px var(--paper-border);
+}
+
 :root {
   background-color: var(--paper-bg);
   color: var(--paper-ink);

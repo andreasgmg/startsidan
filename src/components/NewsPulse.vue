@@ -140,7 +140,7 @@ const handleImageError = (event: any) => {
       </div>
 
       <div v-if="filteredNews.length > displayLimit" class="pt-4 text-center">
-        <button @click="showMore" class="flex items-center gap-2 mx-auto px-8 py-3 border-2 border-paper-border font-black text-[10px] uppercase tracking-[0.2em] hover:bg-paper-ink hover:text-paper-bg transition-all active:scale-95">
+        <button @click="showMore" class="flex items-center gap-2 mx-auto px-10 py-4 neo-subtle bg-paper-surface font-black text-[10px] uppercase tracking-[0.2em] hover:bg-paper-ink hover:text-paper-bg active:scale-95">
           <Plus class="h-4 w-4" />
           {{ props.title?.startsWith('Senaste') ? props.title.replace('Senaste', 'Visa fler') : 'Visa fler' }}
         </button>

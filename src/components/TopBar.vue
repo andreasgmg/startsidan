@@ -19,7 +19,7 @@ const store = useHubStore()
       <div class="flex items-center gap-4 min-w-fit pt-2">
         <button 
           @click="store.toggleTheme"
-          class="p-4 border border-paper-border hover:bg-paper-accent hover:text-white transition-all shadow-sm active:translate-y-0.5 bg-paper-surface"
+          class="p-4 neo-subtle bg-paper-surface"
           title="Växla mörkt/ljust läge"
         >
           <component :is="store.isDarkMode ? Sun : Moon" class="h-6 w-6" />
@@ -27,7 +27,7 @@ const store = useHubStore()
 
         <button 
           @click="store.toggleSettings"
-          class="flex items-center gap-3 font-black text-[11px] uppercase tracking-widest border border-paper-border px-8 py-4 hover:bg-paper-accent hover:text-white transition-all shadow-sm active:translate-y-0.5 bg-paper-surface"
+          class="flex items-center gap-3 font-black text-[11px] uppercase tracking-widest px-8 py-4 neo-subtle bg-paper-surface"
         >
           <Settings2 class="h-5 w-5" />
           Anpassa Sidan
@@ -45,10 +45,10 @@ const store = useHubStore()
           :href="link.url"
           target="_blank"
           rel="noopener noreferrer"
-          class="group flex items-center gap-3 transition-all hover:translate-y-[-2px]"
+          class="group flex items-center gap-3 px-3 py-1.5 neo-tag bg-paper-surface transition-all hover:translate-y-[-2px] hover:shadow-md"
         >
           <img :src="link.favicon" class="w-5 h-5 grayscale group-hover:grayscale-0 opacity-50 group-hover:opacity-100 transition-all" alt="" />
-          <span class="text-[11px] font-black uppercase tracking-wider text-paper-muted group-hover:text-paper-ink border-b-2 border-transparent group-hover:border-paper-accent transition-all">{{ link.name }}</span>
+          <span class="text-[11px] font-black uppercase tracking-wider text-paper-muted group-hover:text-paper-ink transition-all">{{ link.name }}</span>
         </a>
       </div>
     </div>

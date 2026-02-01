@@ -58,7 +58,7 @@ const clearSearch = () => {
         v-model="query"
         type="text" 
         placeholder="Sök i arkivet (t.ex. 'Räntan' eller 'Nvidia')..."
-        class="w-full bg-paper-surface border-2 border-paper-border py-6 pl-16 pr-8 text-2xl font-medium focus:outline-none focus:border-paper-accent shadow-sm focus:shadow-md transition-all placeholder:opacity-30 placeholder:italic"
+        class="w-full bg-paper-surface py-6 pl-16 pr-8 text-2xl font-medium focus:outline-none neo-subtle placeholder:opacity-30 placeholder:italic"
       />
       <button 
         v-if="query" 
@@ -69,9 +69,9 @@ const clearSearch = () => {
       </button>
     </div>
 
-    <!-- Trend Barometer (Hög synlighet) -->
-    <div v-if="store.trends.length > 0" class="flex flex-wrap items-center gap-3 px-2">
-      <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-paper-accent">
+    <!-- Trend Barometer -->
+    <div v-if="store.trends.length > 0" class="flex flex-wrap items-center gap-3 px-2 relative z-10">
+      <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-paper-accent">
         <Flame class="h-4 w-4" />
         Analys trendar just nu:
       </div>
@@ -79,7 +79,7 @@ const clearSearch = () => {
         v-for="trend in store.trends" 
         :key="trend"
         @click="selectTrend(trend)"
-        class="px-4 py-1.5 bg-paper-ink text-paper-bg hover:bg-paper-accent hover:text-white rounded-none text-[11px] font-bold transition-all uppercase tracking-wider shadow-sm hover:-translate-y-0.5 active:translate-y-0"
+        class="px-4 py-1.5 bg-paper-ink text-paper-bg hover:bg-paper-accent hover:text-white rounded-none text-[11px] font-bold transition-all uppercase tracking-wider neo-tag hover:-translate-y-0.5 active:translate-y-0"
       >
         {{ trend }}
       </button>
