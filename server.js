@@ -2,149 +2,177 @@ import express from 'express';
 import cors from 'cors';
 import RSSParser from 'rss-parser';
 import axios from 'axios';
+import Database from 'better-sqlite3';
 
 const app = express();
 const parser = new RSSParser({
   timeout: 10000,
-  headers: { 'User-Agent': 'Mozilla/5.0 StartsidanPro/4.0' }
+  headers: { 'User-Agent': 'StartsidanPro/6.0' }
 });
 const PORT = 3001;
 
-app.use(cors());
+// --- DATABASE SETUP ---
+const db = new Database('news_archive.db');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS articles (
+    link TEXT PRIMARY KEY,
+    title TEXT,
+    sourceId TEXT,
+    pubDate TEXT,
+    description TEXT,
+    image TEXT,
+    fullJson TEXT,
+    createdAt INTEGER
+  )
+`);
 
-// --- DATA PERSISTENCE (In-memory för demo, men strukturerad för ranking) ---
-let globalArchive = new Map(); // Link -> Article Object
-const MAX_AGE_HOURS = 24;
+const insertStmt = db.prepare(`
+  INSERT OR IGNORE INTO articles (link, title, sourceId, pubDate, description, image, fullJson, createdAt)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
 
-// --- RANKING ENGINE LOGIC ---
+// --- RANKING & ANALYTICS ENGINE ---
 
-// 1. Enkel "Entity Extraction" (Hittar signifikanta ord)
+const SWEDISH_STOP_WORDS = new Set([
+  'och', 'det', 'att', 'i', 'en', 'jag', 'hon', 'han', 'på', 'den', 'med', 'var', 'sig', 'för', 
+  'så', 'till', 'är', 'men', 'ett', 'om', 'hade', 'de', 'av', 'icke', 'mig', 'du', 'henne', 
+  'då', 'sin', 'nu', 'har', 'inte', 'hans', 'honom', 'skulle', 'hennes', 'där', 'min', 'man', 
+  'ej', 'vid', 'kunde', 'något', 'från', 'ut', 'när', 'efter', 'upp', 'vi', 'dem', 'vara', 
+  'vad', 'över', 'än', 'dig', 'kan', 'sina', 'här', 'ha', 'mot', 'alla', 'under', 'någon', 
+  'eller', 'allt', 'mycket', 'sedan', 'ju', 'denna', 'själv', 'detta', 'åt', 'utan', 'varit', 
+  'hur', 'ingen', 'mitt', 'ni', 'bli', 'blev', 'oss', 'din', 'dessa', 'några', 'deras', 'bliver', 
+  'mina', 'samma', 'vilken', 'er', 'sådan', 'vår', 'blivit', 'dess', 'inom', 'mellan', 'sådant', 
+  'varför', 'varje', 'vilka', 'ditt', 'vem', 'vilket', 'sitta', 'sådana', 'vart', 'dina', 'vars', 
+  'vårt', 'våra', 'ert', 'era', 'vilkas', 'just', 'bland', 'även', 'både', 'idag', 'igår'
+]);
+
 function getKeywords(text) {
   if (!text) return [];
-  // Vi letar efter ord med stor begynnelsebokstav (Proper nouns) eller långa ord
-  // Detta är en lättviktsversion av NLP
-  return text.match(/[A-ZÅÄÖ][a-zåäö]{3,}/g) || [];
+  const cleanText = text.toLowerCase().replace(/[^\w\s\u00C0-\u00FF]/g, '');
+  return cleanText.split(/\s+/).filter(word => 
+    word.length > 3 && !SWEDISH_STOP_WORDS.has(word)
+  );
+}
+
+function calculateSimilarity(articleA, articleB) {
+  const wordsA = new Set(getKeywords(articleA.title + " " + (articleA.description || "")));
+  const wordsB = new Set(getKeywords(articleB.title + " " + (articleB.description || "")));
+  const intersection = new Set([...wordsA].filter(x => wordsB.has(x)));
+  const union = new Set([...wordsA, ...wordsB]);
+  return union.size === 0 ? 0 : intersection.size / union.size;
 }
 
 function calculateTopHeadlines() {
-  const now = new Date();
-  const allArticles = Array.from(globalArchive.values());
-  
-  // A. Räkna frekvens av ord över ALLA källor senaste 6 timmarna
+  const now = Date.now();
+  const dayAgo = now - (24 * 60 * 60 * 1000);
+  const allArticles = db.prepare("SELECT * FROM articles WHERE createdAt > ?").all(dayAgo);
+  if (allArticles.length === 0) return [];
+
   const trendMap = new Map();
-  const recentArticles = allArticles.filter(a => (now - new Date(a.pubDate)) < 6 * 60 * 60 * 1000);
-  
-  recentArticles.forEach(art => {
-    const words = [...new Set(getKeywords(art.title))];
-    words.forEach(word => {
-      trendMap.set(word, (trendMap.get(word) || 0) + 1);
-    });
+  const recentThreshold = now - (6 * 60 * 60 * 1000);
+  allArticles.forEach(art => {
+    if (art.createdAt > recentThreshold) {
+      const words = [...new Set(getKeywords(art.title))];
+      words.forEach(word => trendMap.set(word, (trendMap.get(word) || 0) + 1));
+    }
   });
 
-  // B. Scora artiklar
   const scored = allArticles.map(art => {
-    let score = 10; // Baspoäng
-    const ageInHours = (now - new Date(art.pubDate)) / (1000 * 60 * 60);
-    
-    // 1. Topic Score: Hur många trendande ord innehåller rubriken?
-    const words = getKeywords(art.title);
-    words.forEach(word => {
+    let score = 10;
+    const ageInHours = (now - new Date(art.pubDate).getTime()) / (1000 * 60 * 60);
+    getKeywords(art.title).forEach(word => {
       const freq = trendMap.get(word) || 0;
-      if (freq > 1) score += (freq * 15); // Bonus om ordet dyker upp i flera källor
+      if (freq > 1) score += (freq * 20);
     });
-
-    // 2. Logaritmisk Time Decay: Score = Base / (age + 1)^1.5
-    // Detta låter viktiga nyheter ligga kvar längre än linjär decay
-    const finalScore = score / Math.pow(ageInHours + 1, 1.2);
-
+    const sourceWeights = { 'svt': 50, 'dn': 40, 'reuters': 45, 'bbc': 45, 'reddit': 10 };
+    score += (sourceWeights[art.sourceId] || 20);
+    const finalScore = score / Math.pow(ageInHours + 1, 1.5);
     return { ...art, rankScore: finalScore };
   });
 
-  // C. Sortera och filtrera dubbletter (Klustring)
   const sorted = scored.sort((a, b) => b.rankScore - a.rankScore);
-  const swedishIds = ['svt', 'dn', 'svd', 'sc'];
-  
-  const topSwedish = [];
-  const topGlobal = [];
-  const seenClusters = new Set();
-  
-  // 1. Hämta 5 bästa SVENSKA
+  const distinctArticles = [];
   for (const art of sorted) {
-    if (topSwedish.length >= 5) break;
-    if (!swedishIds.includes(art.sourceId)) continue;
-    
-    const clusterId = getKeywords(art.title).slice(0, 3).join('_');
-    if (!seenClusters.has(clusterId)) {
-      topSwedish.push(art);
-      seenClusters.add(clusterId);
+    const isDuplicate = distinctArticles.some(existing => calculateSimilarity(existing, art) > 0.3);
+    if (!isDuplicate) {
+      const parsed = JSON.parse(art.fullJson);
+      distinctArticles.push({ ...parsed, rankScore: art.rankScore });
     }
+    if (distinctArticles.length >= 10) break;
   }
-
-  // 2. Hämta 5 bästa GLOBALA
-  for (const art of sorted) {
-    if (topGlobal.length >= 5) break;
-    if (swedishIds.includes(art.sourceId)) continue;
-    
-    const clusterId = getKeywords(art.title).slice(0, 3).join('_');
-    if (!seenClusters.has(clusterId)) {
-      topGlobal.push(art);
-      seenClusters.add(clusterId);
-    }
-  }
-
-  // Slå ihop (Svenska först för relevans, eller sortera efter total score?)
-  // Vi kör de 10 bästa sorterat efter rankScore för att få den absolut tyngsta nyheten först
-  return [...topSwedish, ...topGlobal].sort((a, b) => b.rankScore - a.rankScore);
+  return distinctArticles;
 }
 
-// --- ENDPOINTS ---
+// --- NEWS FETCHING SERVICE ---
+const newsSources = [
+  { id: 'svt', url: 'https://www.svt.se/nyheter/rss.xml' },
+  { id: 'dn', url: 'https://www.dn.se/rss/nyheter/' },
+  { id: 'svd', url: 'https://www.svd.se/?service=rss' },
+  { id: 'bbc', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
+  { id: 'reuters', url: 'https://www.reuters.com/world/rss' },
+  { id: 'reddit', url: 'https://www.reddit.com/r/popular/top.json?t=day&limit=15' }
+];
+
+async function updateAllSources() {
+  console.log('[SERVER] Bakgrundshämtning startad...');
+  for (const source of newsSources) {
+    try {
+      let items = [];
+      if (source.id === 'reddit') {
+        const response = await axios.get(source.url, { headers: { 'User-Agent': 'StartsidanPro/6.0' } });
+        items = response.data.data.children.map(child => ({
+          title: child.data.title, link: `https://reddit.com${child.data.permalink}`,
+          source: `REDDIT R/${child.data.subreddit.toUpperCase()}`, sourceId: 'reddit',
+          pubDate: new Date(child.data.created_utc * 1000).toISOString(), description: child.data.selftext
+        }));
+      } else {
+        const feed = await parser.parseURL(source.url);
+        items = feed.items.map(item => ({
+          title: item.title, link: item.link, sourceId: source.id,
+          source: feed.title?.split(' - ')[0] || source.id.toUpperCase(),
+          pubDate: item.pubDate || item.isoDate, image: item.enclosure?.url || null,
+          description: (item.contentSnippet || item.content || '').replace(/<[^>]*>/g, '').slice(0, 300)
+        }));
+      }
+      items.forEach(item => {
+        insertStmt.run(item.link, item.title, item.sourceId, item.pubDate, item.description, item.image, JSON.stringify(item), Date.now());
+      });
+    } catch (e) { console.error(`[SERVER] Fel vid ${source.id}: ${e.message}`); }
+  }
+  console.log('[SERVER] Bakgrundshämtning klar.');
+}
+
+// --- API ENDPOINTS ---
+app.use(cors());
+
+app.get('/api/dashboard-init', async (req, res) => {
+  let topHeadlines = calculateTopHeadlines();
+  
+  // Om arkivet är tomt, tvinga en hämtning och vänta lite
+  if (topHeadlines.length === 0) {
+    console.log('[SERVER] Arkiv tomt, hämtar data nu...');
+    await updateAllSources();
+    topHeadlines = calculateTopHeadlines();
+  }
+
+  res.json({ topHeadlines, serverTime: new Date() });
+});
 
 app.get('/api/news', async (req, res) => {
   const { url, id } = req.query;
+  // Hämta specifikt flöde (används för kategorierna)
   try {
-    let items = [];
-    if (id === 'reddit') {
-      const response = await axios.get(url, { headers: { 'User-Agent': 'StartsidanPro/4.0' } });
-      items = response.data.data.children.map(child => ({
-        title: child.data.title,
-        link: `https://reddit.com${child.data.permalink}`,
-        source: `REDDIT R/${child.data.subreddit.toUpperCase()}`,
-        sourceId: 'reddit',
-        pubDate: new Date(child.data.created_utc * 1000).toISOString(),
-        description: child.data.selftext
-      }));
-    } else {
-      const feed = await parser.parseURL(url);
-      items = feed.items.map(item => ({
-        title: item.title,
-        link: item.link,
-        source: feed.title?.split(' - ')[0] || id.toUpperCase(),
-        sourceId: id,
-        pubDate: item.pubDate || item.isoDate,
-        description: item.contentSnippet || item.content,
-        image: item.enclosure?.url || null
-      }));
-    }
-
-    // Arkivera
-    items.forEach(item => globalArchive.set(item.link, item));
-    
-    // Rensa gamla
-    const dayAgo = new Date(Date.now() - MAX_AGE_HOURS * 60 * 60 * 1000);
-    for (let [link, art] of globalArchive) {
-      if (new Date(art.pubDate) < dayAgo) globalArchive.delete(link);
-    }
-
-    res.json(items.slice(0, 25));
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/top-headlines', (req, res) => {
-  res.json(calculateTopHeadlines());
+    const feed = await parser.parseURL(url);
+    const items = feed.items.map(item => ({
+      title: item.title, link: item.link, sourceId: id,
+      pubDate: item.pubDate || item.isoDate, description: item.contentSnippet || ''
+    }));
+    res.json(items);
+  } catch (e) { res.status(500).send(e.message); }
 });
 
 app.listen(PORT, () => {
-  console.log(`[OK] Intelligence Engine v6.0 running on port ${PORT}`);
+  console.log(`>>> Intelligence Engine v6.1 running on http://localhost:${PORT}`);
+  updateAllSources(); // Hämta vid start
+  setInterval(updateAllSources, 15 * 60 * 1000); // Var 15:e minut
 });

@@ -20,15 +20,31 @@ export const useHubStore = defineStore('hub', () => {
   const parseDate = (d: any) => {
     try {
       const date = new Date(d)
+      if (isNaN(date.getTime())) return 'Nyligen'
       return formatDistanceToNow(date, { addSuffix: true, locale: sv })
         .replace('tio', '10').replace('elva', '11').replace('tolv', '12')
     } catch (e) { return 'Nyligen' }
   }
 
-  const fetchAllNews = async () => {
+  // --- NY OPTIMERAD DASHBOARD INIT ---
+  const fetchDashboard = async (retryCount = 0) => {
     newsLoading.value = true
     try {
-      // 1. Hämta kategoriserade nyheter
+      const res = await axios.get("http://localhost:3001/api/dashboard-init")
+      
+      if (res.data.topHeadlines.length === 0 && retryCount < 3) {
+        console.log("Toppnyheter fortfarande tomma, försöker igen om 3 sekunder...");
+        setTimeout(() => fetchDashboard(retryCount + 1), 3000);
+        return;
+      }
+
+      topNews.value = res.data.topHeadlines.map((item: any) => ({
+        ...item,
+        pubDateFormatted: parseDate(item.pubDate),
+        rawDate: new Date(item.pubDate)
+      }))
+
+      // 2. Hämta kategoriserade nyheter i bakgrunden
       const proxyUrl = "http://localhost:3001/api/news"
       const enabledSources = newsSources.value.filter((s: any) => s.enabled)
       
@@ -44,21 +60,19 @@ export const useHubStore = defineStore('hub', () => {
             combined.push({
               ...item,
               category: source.category,
-              pubDateFormatted: parseDate(item.pubDate)
+              pubDateFormatted: parseDate(item.pubDate),
+              rawDate: new Date(item.pubDate)
             })
           })
         }
       })
       allNews.value = combined
 
-      // 2. Hämta den färdiga TOPPLISTAN från backend
-      const topRes = await axios.get("http://localhost:3001/api/top-headlines")
-      topNews.value = topRes.data.map((item: any) => ({
-        ...item,
-        pubDateFormatted: parseDate(item.pubDate)
-      }))
-
-    } catch (e) { console.error('Data sync failed') } finally { newsLoading.value = false }
+    } catch (e) { 
+      console.error('MX Dashboard sync failed', e) 
+    } finally { 
+      newsLoading.value = false 
+    }
   }
 
   // Persistenta items
@@ -72,7 +86,7 @@ export const useHubStore = defineStore('hub', () => {
 
   onMounted(() => {
     applyTheme()
-    fetchAllNews()
+    fetchDashboard()
   })
 
   watch([isDarkMode, searchEngine, newsSources, financeItems, quickLinks, isPanicMode, isCompactView, isAdvancedMode], () => {
@@ -88,13 +102,13 @@ export const useHubStore = defineStore('hub', () => {
   }, { deep: true })
 
   return {
-    isDarkMode, searchEngine, newsSources, allNews, topNews, newsLoading, financeItems, quickLinks, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
+    isDarkMode, searchEngine, newsSources, allNews, topNews, newsLoading, financeItems, statusItems: ref([]), quickLinks, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
     togglePanic: () => isPanicMode.value = !isPanicMode.value,
     toggleMode: () => isAdvancedMode.value = !isAdvancedMode.value,
     toggleSettings: () => isSettingsOpen.value = !isSettingsOpen.value,
     toggleCompact: () => isCompactView.value = !isCompactView.value,
     toggleTheme: () => isDarkMode.value = !isDarkMode.value,
-    fetchAllNews,
+    fetchAllNews: fetchDashboard, // Alias för bakåtkompatibilitet
     addQuickLink: (name: string, url: string) => {
       const domain = new URL(url.startsWith('http') ? url : 'https://' + url).hostname
       const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
