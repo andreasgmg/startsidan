@@ -15,6 +15,7 @@ const fetchWeather = async () => {
   
   loading.value = true
   const { lat, lon } = store.userLocation
+  console.log(`[WEATHER] Hämtar väder för koordinater: ${lat.toFixed(2)}, ${lon.toFixed(2)} (${store.userLocation.city})`);
   try {
     const response = await axios.get(`https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/lon/${lon.toFixed(2)}/lat/${lat.toFixed(2)}/data.json`)
     const ts = response.data.timeSeries

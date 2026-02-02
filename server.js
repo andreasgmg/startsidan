@@ -18,7 +18,8 @@ const PORT = 3001;
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
-const db = new Database('news_archive.db');
+// --- DATABASE SETUP ---
+const db = new Database('news_hot.db');
 db.exec(`
   CREATE TABLE IF NOT EXISTS articles (
     link TEXT PRIMARY KEY,
@@ -33,25 +34,60 @@ db.exec(`
     fullJson TEXT,
     createdAt INTEGER
   );
-  CREATE INDEX IF NOT EXISTS idx_articles_pubdate ON articles(pubDateMs);
-  CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(sourceId);
+  CREATE INDEX IF NOT EXISTS idx_pubDate ON articles(pubDateMs);
+  CREATE INDEX IF NOT EXISTS idx_source ON articles(sourceId);
 `);
 
-const insertStmt = db.prepare(`
+const archiveDb = new Database('news_archive.db');
+archiveDb.exec(`
+  CREATE TABLE IF NOT EXISTS articles (
+    link TEXT PRIMARY KEY,
+    title TEXT,
+    sourceId TEXT,
+    pubDateMs INTEGER,
+    fullJson TEXT,
+    sentiment INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_archive_search ON articles(title);
+  CREATE INDEX IF NOT EXISTS idx_archive_date ON articles(pubDateMs);
+`);
+
+const insertHot = db.prepare(`
   INSERT OR REPLACE INTO articles (link, title, sourceId, sourceName, pubDate, pubDateMs, description, image, sentiment, fullJson, createdAt)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
-// --- SR P4 MAPPING ---
-const SR_P4_CHANNELS = {
-  'blekinge': 213, 'dalarna': 223, 'gotland': 215, 'gävleborg': 210, 'halland': 218,
-  'jämtland': 200, 'jönköping': 216, 'kalmar': 214, 'kristianstad': 212, 'kronoberg': 211,
-  'malmö': 101, 'norbotten': 209, 'sjuhärad': 219, 'skaraborg': 220, 'stockholm': 103,
-  'södermanland': 217, 'uppland': 221, 'värmland': 222, 'västerbotten': 208, 'västernorrland': 207,
-  'västmanland': 206, 'örebro': 205, 'östergötland': 204
+const insertArchive = archiveDb.prepare(`
+  INSERT OR IGNORE INTO articles (link, title, sourceId, pubDateMs, fullJson, sentiment)
+  VALUES (?, ?, ?, ?, ?, ?)
+`);
+
+// --- AVANCERAD SR P4 MAPPING ---
+const SR_CHANNELS = {
+  'stockholm': 103, 'göteborg': 104, 'malmö': 101, 'uppland': 221, 'väst': 125,
+  'sjuhärad': 219, 'skaraborg': 220, 'halland': 128, 'blekinge': 105, 'kristianstad': 102,
+  'kronoberg': 211, 'kalmar': 214, 'gotland': 215, 'östergötland': 204, 'sörmland': 217,
+  'örebro': 205, 'västmanland': 206, 'värmland': 222, 'dalarna': 223, 'gävleborg': 210,
+  'jämtland': 200, 'västernorrland': 207, 'västerbotten': 208, 'norbotten': 209
 };
 
-// --- MASTER CONFIG ---
+const MUNICIPALITY_TO_STATION = {
+  'strömstad': 'väst', 'uddevalla': 'väst', 'lysekil': 'väst', 'munkedal': 'väst', 'tanum': 'väst',
+  'trollhättan': 'väst', 'vänersborg': 'väst', 'borås': 'sjuhärad', 'skövde': 'skaraborg',
+  'visby': 'gotland'
+};
+
+const COUNTY_TO_STATION = {
+  'stockholm': 'stockholm', 'västra götaland': 'göteborg', 'skåne': 'malmö',
+  'uppsala': 'uppland', 'södermanland': 'sörmland', 'östergötland': 'östergötland',
+  'jönköping': 'jönköping', 'kronoberg': 'kronoberg', 'kalmar': 'kalmar',
+  'gotland': 'gotland', 'blekinge': 'blekinge', 'halland': 'halland',
+  'värmland': 'värmland', 'örebro': 'örebro', 'västmanland': 'västmanland',
+  'dalarna': 'dalarna', 'gävleborg': 'gävleborg', 'västernorrland': 'västernorrland',
+  'jämtland': 'jämtland', 'västerbotten': 'västerbotten', 'norrbotten': 'norbotten'
+};
+
+// --- CONFIG & STOPWORDS ---
 const GLOBAL_SOURCES = [
   { id: 'kris', name: 'Krisinformation', url: 'https://api.krisinformation.se/v3/news?days=3', category: 'Viktigt', weight: 100 },
   { id: 'svt', name: 'SVT Nyheter', url: 'https://www.svt.se/nyheter/rss.xml', category: 'Sverige', weight: 55 },
@@ -63,6 +99,8 @@ const GLOBAL_SOURCES = [
   { id: 'hn', name: 'Hacker News', url: 'https://hnrss.org/best', category: 'Teknik', weight: 60 },
   { id: 'tech', name: 'TechCrunch', url: 'https://techcrunch.com/feed/', category: 'Teknik', weight: 35 },
   { id: 'sc', name: 'SweClockers', url: 'https://www.sweclockers.com/feeds/nyheter', category: 'Teknik', weight: 35 },
+  { id: 'nasa', name: 'NASA', url: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', category: 'Vetenskap', weight: 40 },
+  { id: 'forsk', name: 'Forskning.se', url: 'https://www.forskning.se/feed/', category: 'Vetenskap', weight: 40 },
   { id: 'fz', name: 'FZ.se', url: 'https://www.fz.se/feeds/nyheter', category: 'Spel', weight: 35 },
   { id: 'svtsport', name: 'SVT Sport', url: 'https://www.svt.se/sport/rss.xml', category: 'Sport', weight: 45 },
   { id: 'svtkultur', name: 'SVT Kultur', url: 'https://www.svt.se/kultur/rss.xml', category: 'Livsstil', weight: 40 },
@@ -130,6 +168,12 @@ function calculateTopHeadlines() {
       const velocity = velocityMap.get(word) || 0;
       if (velocity > 1.5) score += (velocity * 40); 
     });
+    for (let i = 0; i < words.length - 1; i++) {
+      const bigram = words[i] + ' ' + words[i+1];
+      score += (trendMap.get(bigram) || 0) * 25;
+      const velBigram = velocityMap.get(bigram) || 0;
+      if (velBigram > 1) score += (velBigram * 60);
+    }
     const meta = GLOBAL_SOURCES.find(s => s.id === art.sourceId);
     score += (meta ? meta.weight : 25);
     const ageInHours = (now - art.pubDateMs) / (1000 * 60 * 60);
@@ -171,6 +215,7 @@ function calculateTopHeadlines() {
   return { articles: distinct.sort((a, b) => b.rankScore - a.rankScore), trends: finalTrends };
 }
 
+// --- API ---
 app.use(cors());
 
 app.get('/api/config/sources', (req, res) => {
@@ -186,73 +231,71 @@ app.get('/api/search', (req, res) => {
   let q = req.query.q;
   if (!q) return res.json([]);
   q = q.replace(/[%_]/g, '');
-  const hits = db.prepare(`SELECT * FROM articles WHERE title LIKE ? OR description LIKE ? ORDER BY pubDateMs DESC LIMIT 100`).all(`%${q}%`, `%${q}%`);
+  const hotHits = db.prepare(`SELECT fullJson, pubDateMs, sentiment, sourceId FROM articles WHERE title LIKE ? OR description LIKE ? ORDER BY pubDateMs DESC LIMIT 50`).all(`%${q}%`, `%${q}%`);
+  let archiveHits = [];
+  if (hotHits.length < 50) {
+    archiveHits = archiveDb.prepare(`SELECT fullJson, pubDateMs, sentiment, sourceId FROM articles WHERE title LIKE ? ORDER BY pubDateMs DESC LIMIT 50`).all(`%${q}%`);
+  }
+  const combined = [...hotHits, ...archiveHits];
   const distinctHits = [];
-  for (const hit of hits) {
-    if (!distinctHits.some(e => e.sourceId === hit.sourceId && calculateSimilarity(e, hit) > 0.4)) {
-      distinctHits.push(hit);
+  for (const hit of combined) {
+    const parsed = JSON.parse(hit.fullJson);
+    if (!distinctHits.some(e => e.sourceId === hit.sourceId && calculateSimilarity(e, parsed) > 0.4)) {
+      distinctHits.push({ ...parsed, pubDateMs: hit.pubDateMs, sentiment: hit.sentiment });
     }
   }
-  res.json(distinctHits.slice(0, 50).map(h => ({ ...JSON.parse(h.fullJson), pubDate: h.pubDate, sentiment: h.sentiment })));
+  res.json(distinctHits.sort((a, b) => b.pubDateMs - a.pubDateMs).slice(0, 50));
 });
 
 app.get('/api/feed', (req, res) => {
   const sources = req.query.sources ? req.query.sources.split(',') : [];
   if (sources.length === 0) return res.json([]);
   const placeholders = sources.map(() => '?').join(',');
-  const articles = db.prepare(`SELECT * FROM articles WHERE sourceId IN (${placeholders}) ORDER BY pubDateMs DESC LIMIT 200`).all(sources);
-  res.json(articles.map(art => ({ ...JSON.parse(art.fullJson), pubDate: art.pubDate, sentiment: art.sentiment })));
+  const articles = db.prepare(`SELECT fullJson, pubDateMs, sentiment FROM articles WHERE sourceId IN (${placeholders}) ORDER BY pubDateMs DESC LIMIT 200`).all(sources);
+  res.json(articles.map(art => ({ ...JSON.parse(art.fullJson), pubDateMs: art.pubDateMs, sentiment: art.sentiment })));
 });
 
-// NEW: Local Source Helper with Immediate Fetch
 app.get('/api/config/local-source', async (req, res) => {
-  let county = (req.query.county || '').toLowerCase().replace('s län', '').replace(' län', '').trim();
-  // Specialfall för t.ex. Stockholms -> stockholm
-  if (county.endsWith('s')) county = county.slice(0, -1);
-  
-  const channelId = SR_P4_CHANNELS[county];
-  if (!channelId) return res.status(404).json({ error: `Länet '${county}' hittades inte` });
-  
+  const muni = (req.query.municipality || '').toLowerCase();
+  const county = (req.query.county || '').toLowerCase();
+  let stationKey = MUNICIPALITY_TO_STATION[muni] || COUNTY_TO_STATION[county];
+  const channelId = SR_CHANNELS[stationKey];
+  if (!channelId) return res.status(404).json({ error: 'Station not found' });
   const source = {
-    id: `sr-p4-${county}`,
-    name: `SR P4 ${county.charAt(0).toUpperCase() + county.slice(1)}`,
+    id: `sr-p4-${stationKey}`,
+    name: `SR P4 ${stationKey.charAt(0).toUpperCase() + stationKey.slice(1)}`,
     url: `https://api.sr.se/api/rss/channel/${channelId}`,
     category: 'Lokalt',
     weight: 70
   };
-
-  // Trigger en omedelbar fetch så artiklarna hamnar i DB direkt
-  console.log(`[SERVER] Hämtar lokala nyheter omedelbart för: ${source.name}`);
   const items = await fetchWithRetry(source.url, source.id);
-  items.forEach(i => insertStmt.run(i.link, i.title, i.sourceId, source.name, i.pubDate, i.pubDateMs, i.description, i.image, i.sentiment, JSON.stringify(i), Date.now()));
-
+  items.forEach(i => insertHot.run(i.link, i.title, i.sourceId, source.name, i.pubDate, i.pubDateMs, i.description, i.image, i.sentiment, JSON.stringify(i), Date.now()));
   res.json(source);
 });
 
+// --- FETCH SERVICE ---
 async function fetchWithRetry(url, id) {
   try {
     const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 StartsidanPro/11.0' }, timeout: 15000, httpsAgent: agent });
     if (id === 'reddit') {
       return res.data.data.children.map(c => {
         const pDate = new Date(c.data.created_utc * 1000).toISOString();
-        const sentiment = calculateSentiment(c.data.title, c.data.selftext);
         return {
           title: c.data.title, link: `https://reddit.com${c.data.permalink}`,
           sourceId: 'reddit', sourceName: `REDDIT R/${c.data.subreddit.toUpperCase()}`,
           pubDate: pDate, pubDateMs: new Date(pDate).getTime(),
-          description: c.data.selftext, image: null, sentiment
+          description: c.data.selftext, image: null, sentiment: calculateSentiment(c.data.title, c.data.selftext)
         };
       });
     }
     if (id === 'kris') {
       return res.data.map(item => {
         const pDate = item.Published;
-        const sentiment = calculateSentiment(item.PushMessage, item.BodyText);
         return {
           title: "⚠️ " + item.PushMessage, link: `https://krisinformation.se/nyheter/${item.Id}`,
           sourceId: 'kris', sourceName: 'KRISINFORMATION',
           pubDate: pDate, pubDateMs: new Date(pDate).getTime(),
-          description: item.BodyText || item.PushMessage, image: null, sentiment
+          description: item.BodyText || item.PushMessage, image: null, sentiment: calculateSentiment(item.PushMessage, item.BodyText)
         };
       });
     }
@@ -261,11 +304,10 @@ async function fetchWithRetry(url, id) {
       const pDate = i.pubDate || i.isoDate || new Date().toISOString();
       const img = i.enclosure?.url || i.mediaContent?.$.url || i.content?.match(/src="([^"]+)"/)?.[1] || null;
       const desc = (i.contentSnippet || "").replace(/<[^>]*>/g, '').slice(0, 300);
-      const sentiment = calculateSentiment(i.title, desc);
       return {
         title: i.title, link: i.link, sourceId: id, sourceName: feed.title?.split(' - ')[0] || id.toUpperCase(),
         pubDate: pDate, pubDateMs: new Date(pDate).getTime(),
-        description: desc, image: img, sentiment
+        description: desc, image: img, sentiment: calculateSentiment(i.title, desc)
       };
     });
   } catch (e) { return []; }
@@ -273,28 +315,30 @@ async function fetchWithRetry(url, id) {
 
 async function updateAllSources() {
   console.log('[SERVER] Synkar källor...');
-  const activeSources = [...GLOBAL_SOURCES];
-  
-  // Hämta även eventuella dynamiska SR-källor som sparats i DB
-  const dynamicSources = db.prepare("SELECT DISTINCT sourceId, sourceName FROM articles WHERE sourceId LIKE 'sr-p4-%'").all();
-  // ... (Hantering av dynamiska källor kan byggas ut här)
-
   const chunks = [];
-  for (let i = 0; i < activeSources.length; i += 3) chunks.push(activeSources.slice(i, i + 3));
+  for (let i = 0; i < GLOBAL_SOURCES.length; i += 3) chunks.push(GLOBAL_SOURCES.slice(i, i + 3));
   for (const chunk of chunks) {
     await Promise.all(chunk.map(async (source) => {
       const items = await fetchWithRetry(source.url, source.id);
-      items.forEach(i => insertStmt.run(i.link, i.title, i.sourceId, i.sourceName, i.pubDate, i.pubDateMs, i.description, i.image, i.sentiment, JSON.stringify(i), Date.now()));
+      items.forEach(i => insertHot.run(i.link, i.title, i.sourceId, i.sourceName, i.pubDate, i.pubDateMs, i.description, i.image, i.sentiment, JSON.stringify(i), Date.now()));
     }));
     await new Promise(r => setTimeout(r, 300));
   }
-  db.prepare("DELETE FROM articles WHERE pubDateMs < ?").run(Date.now() - (48 * 60 * 60 * 1000));
-  console.log('[SERVER] Synk klar.');
+  const cutoff = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  const oldArticles = db.prepare("SELECT * FROM articles WHERE pubDateMs < ?").all(cutoff);
+  if (oldArticles.length > 0) {
+    const moveTransaction = archiveDb.transaction((articles) => {
+      for (const art of articles) insertArchive.run(art.link, art.title, art.sourceId, art.pubDateMs, art.fullJson, art.sentiment);
+    });
+    moveTransaction(oldArticles);
+    db.prepare("DELETE FROM articles WHERE pubDateMs < ?").run(cutoff);
+  }
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`>>> Intelligence Engine v11.0 (Local Edition) on port ${PORT}`);
+  console.log(`>>> Intelligence Engine v11.4 (Archive Edition) on port ${PORT}`);
   db.exec("VACUUM");
+  archiveDb.exec("VACUUM");
   updateAllSources();
   setInterval(updateAllSources, 15 * 60 * 1000);
 });

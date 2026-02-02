@@ -20,13 +20,6 @@ export const useHubStore = defineStore('hub', () => {
   const userLocation = ref<any>(JSON.parse(localStorage.getItem('userLocation') || 'null'))
   const newsLoading = ref(false)
 
-  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || JSON.stringify([
-    { name: 'BankID', url: 'https://www.bankid.com', favicon: 'https://www.google.com/s2/favicons?domain=bankid.com&sz=64' },
-    { name: '1177', url: 'https://www.1177.se', favicon: 'https://www.google.com/s2/favicons?domain=1177.se&sz=64' },
-    { name: 'Skatteverket', url: 'https://www.skatteverket.se', favicon: 'https://www.google.com/s2/favicons?domain=skatteverket.se&sz=64' },
-    { name: 'Gmail', url: 'https://mail.google.com', favicon: 'https://www.google.com/s2/favicons?domain=google.com&sz=64' }
-  ])))
-
   const parseDate = (d: any) => {
     try {
       const date = new Date(d)
@@ -40,13 +33,19 @@ export const useHubStore = defineStore('hub', () => {
     newsLoading.value = true
     try {
       const configRes = await axios.get("http://localhost:3001/api/config/sources")
-      let sources = configRes.data
+      let sources = [...configRes.data]
 
-      if (userLocation.value && userLocation.value.county) {
+      // Hämta lokal källa baserat på tvättad data
+      if (userLocation.value?.county) {
         try {
-          const localRes = await axios.get(`http://localhost:3001/api/config/local-source?county=${encodeURIComponent(userLocation.value.county)}`)
-          sources.push(localRes.data)
-        } catch (e) { console.warn('Local source fetch failed') }
+          const localRes = await axios.get(`http://localhost:3001/api/config/local-source`, {
+            params: { 
+              county: userLocation.value.county,
+              municipality: userLocation.value.municipality
+            }
+          })
+          if (localRes.data) sources.push(localRes.data)
+        } catch (e) { console.warn('Local source sync failed') }
       }
 
       const savedSources = JSON.parse(localStorage.getItem('newsSources') || '[]')
@@ -55,18 +54,16 @@ export const useHubStore = defineStore('hub', () => {
         return { ...s, enabled: existing ? existing.enabled : true }
       })
 
-      const initRes = await axios.get("http://localhost:3001/api/dashboard-init")
+      const [initRes, feedRes] = await Promise.all([
+        axios.get("http://localhost:3001/api/dashboard-init"),
+        axios.get(`http://localhost:3001/api/feed?sources=${newsSources.value.filter(s => s.enabled).map(s => s.id).join(',')}`)
+      ])
+
       topNews.value = initRes.data.topHeadlines.map((item: any) => ({
-        ...item,
-        pubDateFormatted: parseDate(item.pubDate),
-        rawDate: new Date(item.pubDate)
+        ...item, pubDateFormatted: parseDate(item.pubDate), rawDate: new Date(item.pubDate)
       }))
       trends.value = initRes.data.trends || []
 
-      const enabledSources = newsSources.value.filter((s: any) => s.enabled)
-      const activeIds = enabledSources.map(s => s.id).join(',')
-      const feedRes = await axios.get(`http://localhost:3001/api/feed?sources=${activeIds}`)
-      
       allNews.value = feedRes.data.map((item: any) => {
         const sourceMeta = newsSources.value.find(s => s.id === item.sourceId)
         return {
@@ -76,43 +73,46 @@ export const useHubStore = defineStore('hub', () => {
           rawDate: new Date(item.pubDate)
         }
       })
-    } catch (e) { console.error('Architecture Sync failed', e) } finally { newsLoading.value = false }
+    } catch (e) { console.error('Dashboard fetch failed', e) } finally { newsLoading.value = false }
   }
 
   const updateLocation = async (): Promise<void> => {
     return new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        resolve();
-        return;
-      }
+      if (!navigator.geolocation) { resolve(); return; }
       
       navigator.geolocation.getCurrentPosition(async (pos) => {
         try {
           const { latitude, longitude } = pos.coords
           const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`)
           const addr = res.data.address
-          const county = addr.state || addr.province || addr.county || ''
           
-          // Letar igenom alla nivåer från by till kommun för att hitta ett namn
-          const placeName = addr.city || addr.town || addr.municipality || addr.village || addr.hamlet || addr.suburb || addr.county || 'Din plats';
-          
+          const rawMuni = addr.municipality || addr.city || addr.town || addr.village || '';
+          // Hårdare tvätt: Strömstads kommun -> strömstad
+          const cleanedMuni = rawMuni.toLowerCase().replace(/s kommun$/, '').replace(' kommun', '').trim();
+          const countyName = (addr.state || addr.province || addr.county || '').toLowerCase().replace(' län', '').trim();
+
           userLocation.value = {
             lat: latitude,
             lon: longitude,
-            city: placeName.replace(' kommun', ''),
-            county: county.replace(' län', '').toLowerCase()
+            city: cleanedMuni.charAt(0).toUpperCase() + cleanedMuni.slice(1),
+            municipality: cleanedMuni,
+            county: countyName
           }
+          
           localStorage.setItem('userLocation', JSON.stringify(userLocation.value))
-          console.log(`[GEO] Plats funnen: ${userLocation.value.city}`);
+          console.log(`[GEO] Plats verifierad: ${userLocation.value.city} (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`);
           await fetchDashboard()
           resolve();
-        } catch (e) {
-          console.error('Location geocoding failed')
-          resolve();
-        }
-      }, () => resolve())
+        } catch (e) { console.error('Geocoding failed'); resolve(); }
+      }, () => resolve(), { timeout: 10000 })
     })
   }
+
+  onMounted(async () => {
+    applyTheme()
+    // Tvinga alltid en kontroll av platsen för att undvika Stockholm-buggen
+    await updateLocation()
+  })
 
   const toggleBookmark = (item: any) => {
     const idx = bookmarks.value.findIndex(b => b.link === item.link)
@@ -125,16 +125,12 @@ export const useHubStore = defineStore('hub', () => {
     else document.documentElement.classList.remove('dark')
   }
 
-  onMounted(async () => {
-    applyTheme()
-    // 1. Försök hämta plats först
-    if (!userLocation.value) {
-      await updateLocation()
-    } else {
-      // Om vi redan har plats i localStorage, hämta dashboard direkt
-      fetchDashboard()
-    }
-  })
+  const quickLinks = ref(JSON.parse(localStorage.getItem('quickLinks') || JSON.stringify([
+    { name: 'BankID', url: 'https://www.bankid.com', favicon: 'https://www.google.com/s2/favicons?domain=bankid.com&sz=64' },
+    { name: '1177', url: 'https://www.1177.se', favicon: 'https://www.google.com/s2/favicons?domain=1177.se&sz=64' },
+    { name: 'Skatteverket', url: 'https://www.skatteverket.se', favicon: 'https://www.google.com/s2/favicons?domain=skatteverket.se&sz=64' },
+    { name: 'Gmail', url: 'https://mail.google.com', favicon: 'https://www.google.com/s2/favicons?domain=google.com&sz=64' }
+  ])))
 
   watch([isDarkMode, searchEngine, newsSources, bookmarks, quickLinks, isPanicMode, isCompactView, isAdvancedMode], () => {
     localStorage.setItem('isDarkMode', isDarkMode.value.toString())
