@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import TopBar from './components/TopBar.vue'
 import NewsPulse from './components/NewsPulse.vue'
 import WeatherWidget from './components/WeatherWidget.vue'
+import TrafficWidget from './components/TrafficWidget.vue'
 import FinanceWidget from './components/FinanceWidget.vue'
 import SettingsModule from './components/SettingsModule.vue'
 import { useHubStore } from './stores/useHubStore'
@@ -69,9 +70,9 @@ onMounted(() => {
             <NewsPulse :topOnly="true" />
             
             <NewsPulse 
-              v-if="store.userLocation" 
+              v-if="store.selectedMunicipality || store.userLocation" 
               category="Lokalt" 
-              :title="`Lokala nyheter: ${store.userLocation.city}`" 
+              :title="`Lokala nyheter: ${store.selectedMunicipality || store.userLocation?.city}`" 
             />
           </div>
 
@@ -106,6 +107,7 @@ onMounted(() => {
           />
 
           <WeatherWidget />
+          <TrafficWidget />
           <FinanceWidget />
           
           <!-- Dagens Ord (Passive enrichment) -->

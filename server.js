@@ -1,4 +1,5 @@
 import express from 'express';
+import 'dotenv/config';
 import cors from 'cors';
 import RSSParser from 'rss-parser';
 import axios from 'axios';
@@ -129,6 +130,21 @@ const COUNTY_TO_STATION = {
   'värmland': 'värmland', 'örebro': 'örebro', 'västmanland': 'västmanland',
   'dalarna': 'dalarna', 'gävleborg': 'gävleborg', 'västernorrland': 'västernorrland',
   'jämtland': 'jämtland', 'västerbotten': 'västerbotten', 'norrbotten': 'norbotten'
+};
+
+const COUNTY_CODES = {
+  'stockholms län': 1, 'uppsala län': 3, 'södermanlands län': 4, 'östergötlands län': 5,
+  'jönköpings län': 6, 'kronobergs län': 7, 'kalmar län': 8, 'gotlands län': 9,
+  'blekinge län': 10, 'skåne län': 12, 'hallands län': 13, 'västra götalands län': 14,
+  'värmlands län': 17, 'örebro län': 18, 'västmanland län': 19, 'dalarnas län': 20,
+  'gävleborgs län': 21, 'västernorrlands län': 22, 'jämtlands län': 23,
+  'västerbottens län': 24, 'norrbottens län': 25
+};
+
+const TRAIN_STATION_MAPPING = {
+  'stockholms län': 'Cst',
+  'västra götalands län': 'G',
+  'skåne län': 'M'
 };
 
 // --- SOURCES DB SETUP ---
@@ -432,11 +448,27 @@ function calculateTopHeadlines() {
     const representative = c.reduce((prev, curr) => curr.rankScore > prev.rankScore ? curr : prev);
     const parsed = JSON.parse(representative.fullJson);
     
+    // Extract perspectives (unique sources, excluding the representative's source)
+    const perspectives = [];
+    const usedSources = new Set([representative.sourceId]);
+    
+    // Sort cluster by score to get best alternatives
+    const sortedCluster = [...c].sort((a, b) => b.rankScore - a.rankScore);
+    
+    for (const art of sortedCluster) {
+      if (perspectives.length >= 3) break;
+      if (!usedSources.has(art.sourceId)) {
+        perspectives.push({ source: art.sourceName, title: art.title, link: art.link });
+        usedSources.add(art.sourceId);
+      }
+    }
+
     return {
        ...parsed,
        rankScore: totalScore * diversityBoost, // Use Cluster Score for final sorting
        clusterSize: c.length,
-       sourceCount: distinctSources
+       sourceCount: distinctSources,
+       perspectives: perspectives
     };
   });
   
@@ -523,10 +555,28 @@ app.get('/api/search', (req, res) => {
   let q = req.query.q;
   if (!q) return res.json([]);
   q = q.replace(/[%_]/g, '');
-  const hotHits = db.prepare(`SELECT fullJson, pubDateMs, sentiment, sourceId FROM articles WHERE title LIKE ? OR description LIKE ? ORDER BY pubDateMs DESC LIMIT 50`).all(`%${q}%`, `%${q}%`);
+  
+  // Stemming search logic
+  const stem = stemWord(q);
+  const searchPattern = `%${q}%`;
+  const stemPattern = `%${stem}%`;
+  
+  // Search for both original query and stem
+  const hotHits = db.prepare(`
+    SELECT fullJson, pubDateMs, sentiment, sourceId 
+    FROM articles 
+    WHERE title LIKE ? OR description LIKE ? OR title LIKE ? 
+    ORDER BY pubDateMs DESC LIMIT 50
+  `).all(searchPattern, searchPattern, stemPattern);
+
   let archiveHits = [];
   if (hotHits.length < 50) {
-    archiveHits = archiveDb.prepare(`SELECT fullJson, pubDateMs, sentiment, sourceId FROM articles WHERE title LIKE ? ORDER BY pubDateMs DESC LIMIT 50`).all(`%${q}%`);
+    archiveHits = archiveDb.prepare(`
+      SELECT fullJson, pubDateMs, sentiment, sourceId 
+      FROM articles 
+      WHERE title LIKE ? OR title LIKE ? 
+      ORDER BY pubDateMs DESC LIMIT 50
+    `).all(searchPattern, stemPattern);
   }
   const combined = [...hotHits, ...archiveHits];
   const distinctHits = [];
@@ -548,9 +598,100 @@ app.get('/api/feed', (req, res) => {
   res.json(deduplicateList(rawList));
 });
 
-app.get('/api/config/local-source', async (req, res) => {
-  const muni = (req.query.municipality || '').toLowerCase();
+app.get('/api/traffic', async (req, res) => {
   const county = (req.query.county || '').toLowerCase();
+  const countyNo = COUNTY_CODES[county];
+  const stationCode = TRAIN_STATION_MAPPING[county];
+
+  if (!countyNo) {
+    return res.json({ trafficStatus: 'green', messages: [] });
+  }
+
+  if (!process.env.TRAFIKVERKET_API_KEY) {
+    console.warn('[SERVER] Trafikverket API key missing. Skipping traffic check.');
+    return res.json({ trafficStatus: 'green', messages: ['API-nyckel för Trafikverket saknas.'] });
+  }
+
+  try {
+    const xmlQuery = `
+      <REQUEST>
+        <LOGIN authenticationkey="${process.env.TRAFIKVERKET_API_KEY || ''}" />
+        <QUERY objecttype="Situation" schemaversion="1.2">
+          <FILTER>
+            <AND>
+              <IN name="Deviation.CountyNo" value="${countyNo}" />
+              <GT name="Deviation.SeverityCode" value="3" />
+            </AND>
+          </FILTER>
+          <INCLUDE>Deviation</INCLUDE>
+        </QUERY>
+        ${stationCode ? `
+        <QUERY objecttype="TrainAnnouncement" schemaversion="1.6" orderby="AdvertisedTimeAtLocation">
+          <FILTER>
+            <AND>
+              <EQ name="LocationSignature" value="${stationCode}" />
+              <EQ name="ActivityType" value="Avgang" />
+              <GT name="AdvertisedTimeAtLocation" value="${new Date().toISOString()}" />
+              <LT name="AdvertisedTimeAtLocation" value="${new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString()}" />
+            </AND>
+          </FILTER>
+          <INCLUDE>Canceled</INCLUDE>
+          <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
+          <INCLUDE>TimeAtLocationWithSeconds</INCLUDE>
+          <INCLUDE>ToLocation</INCLUDE>
+        </QUERY>
+        ` : ''}
+      </REQUEST>
+    `;
+
+    const response = await axios.post('https://api.trafikinfo.trafikverket.se/v2/data.json', xmlQuery, {
+      headers: { 'Content-Type': 'text/xml' }
+    });
+
+    const result = response.data.RESPONSE.RESULT;
+    const situations = result[0]?.Situation || [];
+    const trains = result[1]?.TrainAnnouncement || [];
+
+    const messages = [];
+    situations.forEach(s => {
+      (s.Deviation || []).forEach(d => {
+        if (d.Message) messages.push(d.Message);
+      });
+    });
+
+    trains.forEach(t => {
+      const isCanceled = t.Canceled === true;
+      const advTime = new Date(t.AdvertisedTimeAtLocation);
+      const actTime = t.TimeAtLocationWithSeconds ? new Date(t.TimeAtLocationWithSeconds) : null;
+      const delayMinutes = actTime ? (actTime.getTime() - advTime.getTime()) / (1000 * 60) : 0;
+
+      if (isCanceled || delayMinutes > 15) {
+        const type = isCanceled ? 'Inställt' : 'Försenat';
+        const time = t.AdvertisedTimeAtLocation ? t.AdvertisedTimeAtLocation.split('T')[1].slice(0, 5) : '??:??';
+        const to = (t.ToLocation && t.ToLocation[0]) ? t.ToLocation[0].LocationName : 'okänd';
+        messages.push(`${type}: Tåg mot ${to} (${time})`);
+      }
+    });
+
+    res.json({
+      trafficStatus: messages.length > 0 ? 'red' : 'green',
+      messages: Array.from(new Set(messages)).slice(0, 5)
+    });
+  } catch (error) {
+    if (error.response?.status === 401) {
+      console.error('[SERVER] Trafikverket error: 401 Unauthorized (Check your API key)');
+    } else if (error.response?.data?.RESPONSE?.RESULT?.[0]?.ERROR) {
+      console.error('[SERVER] Trafikverket API error:', error.response.data.RESPONSE.RESULT[0].ERROR);
+    } else {
+      console.error('[SERVER] Trafikverket error:', error.message);
+    }
+    res.json({ trafficStatus: 'green', messages: ['Trafikverket kunde inte nås'] });
+  }
+});
+
+app.get('/api/config/local-source', async (req, res) => {
+  const muni = (req.query.municipality || '').toLowerCase().replace(' kommun', '').replace(/s$/, '');
+  const county = (req.query.county || '').toLowerCase().replace(' län', '');
   let stationKey = MUNICIPALITY_TO_STATION[muni] || COUNTY_TO_STATION[county];
   const channelId = SR_CHANNELS[stationKey];
   if (!channelId) return res.status(404).json({ error: 'Station not found' });
@@ -562,6 +703,10 @@ app.get('/api/config/local-source', async (req, res) => {
     weight: 70
   };
   const items = await fetchWithRetry(source.url, source.id);
+  
+  // Instant stats update for local news too
+  if (items.length > 0) updateWordStats(items);
+  
   items.forEach(i => insertHot.run(i.link, i.title, i.sourceId, source.name, i.pubDate, i.pubDateMs, i.description, i.image, i.sentiment, JSON.stringify(i), Date.now()));
   res.json(source);
 });
@@ -614,13 +759,29 @@ async function updateAllSources() {
   const sources = db.prepare("SELECT * FROM sources").all();
   const chunks = [];
   for (let i = 0; i < sources.length; i += 3) chunks.push(sources.slice(i, i + 3));
+  
   for (const chunk of chunks) {
     await Promise.all(chunk.map(async (source) => {
       const items = await fetchWithRetry(source.url, source.id);
-      items.forEach(i => insertHot.run(i.link, i.title, i.sourceId, i.sourceName, i.pubDate, i.pubDateMs, i.description, i.image, i.sentiment, JSON.stringify(i), Date.now()));
+      
+      // FIX A: Update stats immediately for new items
+      if (items.length > 0) {
+         // Filter out items already in DB to avoid double counting if fetch overlaps
+         // (Simple check: is link in hot DB?)
+         const newItems = items.filter(i => {
+           const exists = db.prepare("SELECT 1 FROM articles WHERE link = ?").get(i.link);
+           return !exists;
+         });
+         
+         if (newItems.length > 0) {
+            updateWordStats(newItems);
+            newItems.forEach(i => insertHot.run(i.link, i.title, i.sourceId, i.sourceName, i.pubDate, i.pubDateMs, i.description, i.image, i.sentiment, JSON.stringify(i), Date.now()));
+         }
+      }
     }));
     await new Promise(r => setTimeout(r, 300));
   }
+  
   const cutoff = Date.now() - (7 * 24 * 60 * 60 * 1000);
   const oldArticles = db.prepare("SELECT * FROM articles WHERE pubDateMs < ?").all(cutoff);
   if (oldArticles.length > 0) {
@@ -628,8 +789,7 @@ async function updateAllSources() {
       for (const art of articles) insertArchive.run(art.link, art.title, art.sourceId, art.pubDateMs, art.fullJson, art.sentiment);
     });
     moveTransaction(oldArticles);
-    // Update global stats with the moved articles
-    updateWordStats(oldArticles);
+    // REMOVED: updateWordStats(oldArticles) - We now do this on ingestion!
     db.prepare("DELETE FROM articles WHERE pubDateMs < ?").run(cutoff);
   }
   

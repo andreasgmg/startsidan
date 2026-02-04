@@ -1,11 +1,40 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useHubStore } from '../stores/useHubStore'
-import { X, Trash2, Settings2, Newspaper, Link, Moon, Sun } from 'lucide-vue-next'
+import { X, Trash2, Settings2, Newspaper, Link, Moon, Sun, MapPin } from 'lucide-vue-next'
 
 const store = useHubStore()
 const newLinkName = ref('')
 const newLinkUrl = ref('')
+
+const municipalities = [
+  { name: 'Stockholm', county: 'stockholms län' },
+  { name: 'Göteborg', county: 'västra götalands län' },
+  { name: 'Malmö', county: 'skåne län' },
+  { name: 'Uppsala', county: 'uppsala län' },
+  { name: 'Linköping', county: 'östergötlands län' },
+  { name: 'Västerås', county: 'västmanlands län' },
+  { name: 'Örebro', county: 'örebro län' },
+  { name: 'Norrköping', county: 'östergötlands län' },
+  { name: 'Helsingborg', county: 'skåne län' },
+  { name: 'Jönköping', county: 'jönköpings län' },
+  { name: 'Umeå', county: 'västerbottens län' },
+  { name: 'Lund', county: 'skåne län' },
+  { name: 'Borås', county: 'västra götalands län' },
+  { name: 'Eskilstuna', county: 'södermanlands län' },
+  { name: 'Gävle', county: 'gävleborgs län' },
+  { name: 'Sundsvall', county: 'västernorrlands län' },
+  { name: 'Karlstad', county: 'värmlands län' }
+].sort((a, b) => a.name.localeCompare(b.name))
+
+const updateMunicipality = (event: Event) => {
+  const name = (event.target as HTMLSelectElement).value
+  const muni = municipalities.find(m => m.name === name)
+  if (muni) {
+    store.selectedMunicipality = muni.name
+    store.selectedCounty = muni.county
+  }
+}
 
 const handleAddLink = () => {
   if (newLinkName.value && newLinkUrl.value) {
@@ -53,6 +82,30 @@ const handleAddLink = () => {
                 <Moon class="h-8 w-8" />
                 <span class="text-xs font-black uppercase tracking-widest">Nattläge</span>
               </button>
+            </div>
+          </section>
+
+          <!-- Plats & Region -->
+          <section>
+            <div class="flex items-center gap-4 mb-8 border-b-2 border-paper-border pb-2 opacity-80">
+              <MapPin class="h-5 w-5" />
+              <span class="news-subline">Plats & Region</span>
+            </div>
+            <div class="space-y-4">
+              <p class="text-xs font-bold uppercase tracking-widest opacity-60">Välj din hemkommun för lokala nyheter och trafik</p>
+              <select 
+                @change="updateMunicipality" 
+                :value="store.selectedMunicipality"
+                class="w-full paper-input p-4 text-lg font-bold italic appearance-none cursor-pointer bg-paper-surface"
+              >
+                <option value="">Välj kommun...</option>
+                <option v-for="muni in municipalities" :key="muni.name" :value="muni.name">
+                  {{ muni.name }}
+                </option>
+              </select>
+              <div v-if="store.selectedCounty" class="text-[10px] font-black uppercase tracking-[0.2em] opacity-40">
+                Region: {{ store.selectedCounty }}
+              </div>
             </div>
           </section>
 

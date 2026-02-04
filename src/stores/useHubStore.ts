@@ -12,6 +12,9 @@ export const useHubStore = defineStore('hub', () => {
   const isAdvancedMode = ref(localStorage.getItem('isAdvancedMode') === 'true')
   const isSettingsOpen = ref(false)
   
+  const selectedMunicipality = ref(localStorage.getItem('selectedMunicipality') || '')
+  const selectedCounty = ref(localStorage.getItem('selectedCounty') || '')
+
   const newsSources = ref<any[]>([])
   const allNews = ref<any[]>([])
   const topNews = ref<any[]>([])
@@ -35,13 +38,16 @@ export const useHubStore = defineStore('hub', () => {
       const configRes = await axios.get("http://localhost:3001/api/config/sources")
       let sources = [...configRes.data]
 
-      // Hämta lokal källa baserat på tvättad data
-      if (userLocation.value?.county) {
+      // Prioritera manuellt vald plats framför detekterad
+      const currentCounty = selectedCounty.value || userLocation.value?.county
+      const currentMuni = selectedMunicipality.value || userLocation.value?.municipality
+
+      if (currentCounty) {
         try {
           const localRes = await axios.get(`http://localhost:3001/api/config/local-source`, {
             params: { 
-              county: userLocation.value.county,
-              municipality: userLocation.value.municipality
+              county: currentCounty,
+              municipality: currentMuni
             }
           })
           if (localRes.data) sources.push(localRes.data)
@@ -132,7 +138,7 @@ export const useHubStore = defineStore('hub', () => {
     { name: 'Gmail', url: 'https://mail.google.com', favicon: 'https://www.google.com/s2/favicons?domain=google.com&sz=64' }
   ])))
 
-  watch([isDarkMode, searchEngine, newsSources, bookmarks, quickLinks, isPanicMode, isCompactView, isAdvancedMode], () => {
+  watch([isDarkMode, searchEngine, newsSources, bookmarks, quickLinks, isPanicMode, isCompactView, isAdvancedMode, selectedMunicipality, selectedCounty], () => {
     localStorage.setItem('isDarkMode', isDarkMode.value.toString())
     localStorage.setItem('searchEngine', searchEngine.value)
     localStorage.setItem('newsSources', JSON.stringify(newsSources.value))
@@ -141,11 +147,18 @@ export const useHubStore = defineStore('hub', () => {
     localStorage.setItem('isPanicMode', isPanicMode.value.toString())
     localStorage.setItem('isCompactView', isCompactView.value.toString())
     localStorage.setItem('isAdvancedMode', isAdvancedMode.value.toString())
+    localStorage.setItem('selectedMunicipality', selectedMunicipality.value)
+    localStorage.setItem('selectedCounty', selectedCounty.value)
     applyTheme()
   }, { deep: true })
 
+  watch([selectedMunicipality, selectedCounty], () => {
+    fetchDashboard()
+  })
+
   return {
     isDarkMode, searchEngine, newsSources, allNews, topNews, trends, bookmarks, userLocation, newsLoading, isPanicMode, isSettingsOpen, isCompactView, isAdvancedMode,
+    selectedMunicipality, selectedCounty,
     financeItems: ref(JSON.parse(localStorage.getItem('financeItems') || '[]')),
     quickLinks,
     togglePanic: () => isPanicMode.value = !isPanicMode.value,
