@@ -3,8 +3,6 @@ import { ref, onMounted } from 'vue'
 import TopBar from './components/TopBar.vue'
 import NewsPulse from './components/NewsPulse.vue'
 import WeatherWidget from './components/WeatherWidget.vue'
-import CalendarWidget from './components/CalendarWidget.vue'
-import TodoWidget from './components/TodoWidget.vue'
 import FinanceWidget from './components/FinanceWidget.vue'
 import SettingsModule from './components/SettingsModule.vue'
 import { useHubStore } from './stores/useHubStore'
@@ -55,60 +53,71 @@ onMounted(() => {
 
       <TopBar />
 
-      <!-- Main Layout -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 mt-16 items-start">
+      <!-- Main Layout: Cockpit Style (80/20 Split) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-16 mt-16 items-start">
         
-        <!-- Kolumn 1: Huvudflöde (Bred) -->
-        <div class="lg:col-span-5 space-y-24">
-          <!-- Krisinformation (Visas bara om det finns meddelanden) -->
-          <NewsPulse 
-            v-if="store.allNews.some(n => n.category === 'Viktigt')"
-            category="Viktigt" 
-            title="Viktiga Meddelanden" 
-          />
+        <!-- MAIN COCKPIT: News Feed (approx 75%) -->
+        <div class="lg:col-span-9 space-y-24">
+          <!-- 1. Critical & Top Headlines (Full Width) -->
+          <div class="space-y-24">
+            <NewsPulse 
+              v-if="store.allNews.some(n => n.category === 'Viktigt')"
+              category="Viktigt" 
+              title="Viktiga Meddelanden" 
+            />
 
-          <NewsPulse :topOnly="true" />
+            <NewsPulse :topOnly="true" />
+            
+            <NewsPulse 
+              v-if="store.userLocation" 
+              category="Lokalt" 
+              :title="`Lokala nyheter: ${store.userLocation.city}`" 
+            />
+          </div>
 
-          <!-- Lokala Nyheter (SR P4) - Flyttad under Toppnyheter -->
-          <NewsPulse 
-            v-if="store.userLocation" 
-            category="Lokalt" 
-            :title="`Lokala nyheter: ${store.userLocation.city}`" 
-          />
+          <!-- 2. The Daily Feed (2 Columns for density) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-16 gap-y-24 border-t-2 border-paper-border pt-16">
+            <!-- Left Sub-col -->
+            <div class="space-y-16">
+              <NewsPulse category="Sverige" title="Inrikes" />
+              <NewsPulse category="Världen" title="Global Utblick" />
+              <NewsPulse category="Sport" title="Sport" />
+            </div>
 
-          <!-- Sparade Artiklar (Visas bara om det finns några) -->
-          <NewsPulse category="Sverige" title="Senaste från Sverige" />
-          <NewsPulse category="Världen" title="Senaste globalt" />
+            <!-- Right Sub-col -->
+            <div class="space-y-16 md:border-l md:border-paper-border md:pl-16">
+              <NewsPulse category="Teknik" title="Teknik & Innovation" />
+              <NewsPulse category="Vetenskap" title="Vetenskap" />
+              <NewsPulse category="Spel" title="Digital Kultur" />
+              <NewsPulse category="Livsstil" title="Livsstil & Nöje" />
+              <NewsPulse category="Reddit" title="Reddit & Viral" />
+            </div>
+          </div>
         </div>
 
-        <!-- Kolumn 2: Livet, Teknik & Vetenskap (Mellan) -->
-        <div class="lg:col-span-4 lg:px-10 lg:border-x lg:border-paper-border dark:lg:border-dark-border space-y-16">
-          <CalendarWidget />
-          <TodoWidget />
-          <NewsPulse category="Teknik" title="Senaste tekniknyheterna" />
-          <NewsPulse category="Vetenskap" title="Vetenskap & Framtid" />
-          <NewsPulse category="Spel" title="Spel & Digital Kultur" />
-        </div>
+        <!-- SIDEBAR: Passive Context (Weather, Finance, Words) -->
+        <div class="lg:col-span-3 space-y-16 lg:border-l-2 lg:border-paper-border lg:pl-10">
+          
+          <!-- Sparade Artiklar (Läs senare) -->
+          <NewsPulse 
+            v-if="store.bookmarks.length > 0" 
+            title="Läs senare" 
+            :customItems="store.bookmarks"
+          />
 
-        <!-- Kolumn 3: Status, Reddit & Intressen (Smal) -->
-        <div class="lg:col-span-3 space-y-16">
           <WeatherWidget />
           <FinanceWidget />
           
-          <!-- Dagens Ord -->
+          <!-- Dagens Ord (Passive enrichment) -->
           <div v-if="dailyWord" class="p-8 border border-paper-border italic bg-paper-gold/20 dark:bg-paper-gold/5 relative group overflow-hidden shadow-sm">
             <Quote class="absolute -right-4 -bottom-4 h-24 w-24 opacity-[0.03] rotate-12" />
             <span class="news-subline opacity-40 block mb-6 text-paper-muted">Dagens Ord</span>
-            <div v-if="dailyWord" class="space-y-4 relative z-10">
+            <div class="space-y-4 relative z-10">
               <h5 class="text-4xl font-black news-headline">{{ dailyWord.word }}</h5>
               <p class="text-sm font-medium leading-relaxed text-paper-muted">{{ dailyWord.meaning }}</p>
             </div>
             <div class="mt-8 pt-4 border-t border-paper-border text-[9px] font-black uppercase opacity-30 text-paper-muted">Källa: SAOL</div>
           </div>
-
-          <NewsPulse category="Reddit" title="Trendar på Reddit" />
-          <NewsPulse category="Sport" title="Sportens Värld" />
-          <NewsPulse category="Livsstil" title="Livsstil & Inspiration" />
         </div>
 
       </div>
@@ -117,8 +126,8 @@ onMounted(() => {
       <footer class="mt-40 py-12 border-t-2 border-paper-border flex flex-col md:flex-row justify-between items-center gap-8 text-[10px] font-black uppercase tracking-[0.5em] opacity-40">
         <span>Publicerad digitalt v.2026.02</span>
         <div class="flex gap-16">
-          <span>Helt anpassningsbar</span>
-          <button @click="store.toggleSettings" class="hover:text-paper-accent transition-colors">Redigera Layout</button>
+          <span>Omvärldskoll utan distraktioner</span>
+          <button @click="store.toggleSettings" class="hover:text-paper-accent transition-colors">Redigera Källor</button>
         </div>
       </footer>
     </main>
