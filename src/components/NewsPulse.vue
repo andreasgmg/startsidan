@@ -37,20 +37,15 @@ const filteredNews = computed(() => {
   const items = (props.topOnly ? store.topNews : store.allNews) as NewsItem[]
   if (!items || items.length === 0) return []
   
+  // Top News are pre-calculated/sorted by server
   if (props.topOnly) return items.slice(0, 10)
 
-  const categoryItems = props.category 
-    ? items.filter(item => item.category === props.category)
-    : items
-
-  const sorted = [...categoryItems].sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime())
-  const seenTitles = new Set<string>()
-  return sorted.filter(item => {
-    const normalized = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)
-    if (seenTitles.has(normalized)) return false
-    seenTitles.add(normalized)
-    return true
-  })
+  // Category filtering for Feed
+  if (props.category) {
+    return items.filter(item => item.category === props.category)
+  }
+  
+  return items
 })
 
 const visibleNews = computed(() => filteredNews.value.slice(0, displayLimit.value))
